@@ -87,16 +87,20 @@ def validate_options(count: int, min_pages: int, max_pages: int) -> tuple[int, .
 
 
 def build_tickets(count: int = 100, seed: int = 42, min_pages: int = 6,
-                  max_pages: int = 12, start_date: date = date(2030, 4, 1)) -> list[Ticket]:
+                  max_pages: int = 12, start_date: date = date(2030, 4, 1),
+                  start_index: int = 1) -> list[Ticket]:
     """Create deterministic fictional records; dates do not depend on today's date."""
     choices = validate_options(count, min_pages, max_pages)
+    if not 1 <= start_index <= 1_000_000 or start_index + count - 1 > 1_000_000:
+        raise ValueError("ticket index range must be between 1 and 1000000")
     rng = random.Random(seed)
     adjectives = ("Amber", "Cobalt", "Cedar", "Copper", "Indigo", "Maple", "Quartz", "Silver", "Willow", "Zephyr")
     nouns = ("Workshop", "Fabrication", "Assembly", "Structures", "Projects", "Buildworks", "Logistics", "Engineering", "Installations", "Contracting")
     equipment = ("Deck panel", "Support frame", "Adjustable brace", "Base plate", "Safety rail", "Access ladder", "Connector set", "Storage rack")
     tickets = []
-    for i in range(count):
-        when = start_date + timedelta(days=i % 45)
+    for position in range(count):
+        i = start_index + position - 1
+        when = start_date + timedelta(days=position % 45)
         customer = f"Demo {adjectives[(i // 10) % 10]} {nouns[i % 10]}"
         items = tuple(Item(f"DEMO-{i + 1:04d}-{j + 1:02d}", description,
                            rng.randint(2, 30), str(Decimal(rng.randint(250, 2400)) / 100))
@@ -293,9 +297,9 @@ def _check_destination(output: Path, overwrite: bool):
 def generate_dataset(output: Path, count: int = 100, seed: int = 42,
                      min_pages: int = 6, max_pages: int = 12,
                      start_date: date = date(2030, 4, 1), overwrite: bool = False,
-                     rasterize: bool = True) -> dict:
+                     rasterize: bool = True, start_index: int = 1) -> dict:
     """Build an isolated dataset, replacing only a recognized dataset when requested."""
-    tickets = build_tickets(count, seed, min_pages, max_pages, start_date)
+    tickets = build_tickets(count, seed, min_pages, max_pages, start_date, start_index)
     output = Path(output).absolute()
     _check_destination(output, overwrite)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -315,7 +319,7 @@ def generate_dataset(output: Path, count: int = 100, seed: int = 42,
             manifest_tickets.append(record)
         _write_tracker(staging / "orders.xlsx", tickets)
         manifest = {"generator": GENERATOR_ID, "seed": seed, "count": count,
-                    "start_date": start_date.isoformat(), "min_pages": min_pages,
+                    "start_date": start_date.isoformat(), "start_index": start_index, "min_pages": min_pages,
                     "max_pages": max_pages, "document_types": list(DOCUMENT_TYPES),
                     "page_count_rule": "Two to four colored copies of each of three papers by default; total pages are multiples of three.",
                     "rasterized": rasterize, "render_dpi": 120 if rasterize else None,
@@ -346,6 +350,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output", type=Path, default=ROOT / "demo_data", help="Isolated output directory (default: repository/demo_data)")
     parser.add_argument("--count", type=int, default=100, help="Number of tickets, 1-1000 (default: 100)")
+    parser.add_argument("--start-index", type=int, default=1, help="First ticket index; choose a new range for separate batches (default: 1)")
     parser.add_argument("--seed", type=int, default=42, help="Seed for repeatable fictional records (default: 42)")
     parser.add_argument("--min-pages", type=int, default=6, help="Minimum total pages per ticket (default: 6)")
     parser.add_argument("--max-pages", type=int, default=12, help="Maximum total pages per ticket (default: 12)")
@@ -355,7 +360,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         result = generate_dataset(args.output, args.count, args.seed, args.min_pages,
-                                  args.max_pages, args.start_date, args.overwrite, not args.vector)
+                                  args.max_pages, args.start_date, args.overwrite, not args.vector, args.start_index)
     except (ValueError, FileExistsError) as exc:
         parser.error(str(exc))
     print(f"Created {result['count']} synthetic tickets / {result['total_pages']} pages in {args.output.absolute()}")

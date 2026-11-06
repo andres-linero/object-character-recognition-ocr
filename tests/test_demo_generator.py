@@ -116,3 +116,19 @@ def test_overwrite_does_not_delete_non_generator_directory(tmp_path):
     with pytest.raises(ValueError, match="generator-owned"):
         demo.generate_dataset(target, count=1, overwrite=True)
     assert (target / "important.pdf").read_bytes() == b"untouched"
+
+
+def test_additional_batches_use_nonoverlapping_identifiers(tmp_path):
+    initial = demo.build_tickets(count=100)
+    second = demo.build_tickets(count=10, start_index=101, min_pages=6, max_pages=6)
+    third = demo.build_tickets(count=10, start_index=111, min_pages=6, max_pages=6)
+    assert len({t.shipment for t in initial + second + third}) == 120
+    assert len({t.order_id for t in initial + second + third}) == 120
+    assert sum(t.page_count for t in second) == sum(t.page_count for t in third) == 60
+    output = tmp_path / "batch"
+    result = demo.generate_dataset(output, count=1, start_index=101, rasterize=False)
+    assert result["start_index"] == 101
+    assert result["tickets"][0]["shipment"] == "900101"
+    with pytest.raises(ValueError, match="index range"):
+        demo.generate_dataset(tmp_path / "invalid", start_index=0)
+    assert not (tmp_path / "invalid").exists()

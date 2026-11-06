@@ -69,3 +69,14 @@ Seed `42` with 100 tickets produces 930 image-only pages: 26 packets of 6 pages,
 The generator and application suite pass 25 tests. All generated packets were checked for expected page counts, image-only pages, unique identifiers, and tracker/manifest consistency. Representative pages from the three paper layouts were rendered for visual review.
 
 Offline text recognition on 27 rendered header crops (one 6-page, one 9-page, and one 12-page packet) recovered every expected shipment number. The existing OCR extraction parser returned the correct identifier for all 27 recognized headers. Azure itself was not called.
+
+## Additional batches
+
+Use `--start-index` to avoid reusing shipment/order IDs across datasets. Changing only the seed changes the fictional details but does not change the default ID range. For two 60-page batches after the initial 100 tickets:
+
+```sh
+python3 scripts/create_demo_data.py --count 10 --seed 43 --start-index 101 --min-pages 6 --max-pages 6 --output demo_batches/batch_02
+python3 scripts/create_demo_data.py --count 10 --seed 44 --start-index 111 --min-pages 6 --max-pages 6 --output demo_batches/batch_03
+```
+
+Activate your virtual environment first. If `python` is unavailable, use `python3` or the environment's full Python path. Each batch has its own matching tracker.

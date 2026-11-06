@@ -73,3 +73,5 @@ $RECYCLE.BIN/
 
 # Generated synthetic demo datasets
 /demo_data/
+
+/demo_batches/
