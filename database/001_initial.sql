@@ -7,142 +7,142 @@ CREATE SCHEMA IF NOT EXISTS core;
 CREATE SCHEMA IF NOT EXISTS ops;
 
 CREATE TABLE ops.schema_versions (
-	version SERIAL NOT NULL, 
-	applied_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	version SERIAL NOT NULL,
+	applied_at TIMESTAMP WITH TIME ZONE NOT NULL,
 	PRIMARY KEY (version)
 );
 
 CREATE TABLE ops.ingestion_runs (
-	id VARCHAR(36) NOT NULL, 
-	kind VARCHAR(30) NOT NULL, 
-	started_at TIMESTAMP WITH TIME ZONE NOT NULL, 
-	finished_at TIMESTAMP WITH TIME ZONE, 
-	status VARCHAR(20) NOT NULL, 
-	rows_seen INTEGER NOT NULL, 
-	rows_loaded INTEGER NOT NULL, 
-	rows_rejected INTEGER NOT NULL, 
-	error_code VARCHAR(80), 
-	PRIMARY KEY (id), 
-	CHECK (status IN ('running','success','partial','failed')), 
+	id VARCHAR(36) NOT NULL,
+	kind VARCHAR(30) NOT NULL,
+	started_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	finished_at TIMESTAMP WITH TIME ZONE,
+	status VARCHAR(20) NOT NULL,
+	rows_seen INTEGER NOT NULL,
+	rows_loaded INTEGER NOT NULL,
+	rows_rejected INTEGER NOT NULL,
+	error_code VARCHAR(80),
+	PRIMARY KEY (id),
+	CHECK (status IN ('running','success','partial','failed')),
 	CHECK (rows_seen >= 0 AND rows_loaded >= 0 AND rows_rejected >= 0)
 );
 
 CREATE TABLE staging.source_files (
-	id VARCHAR(36) NOT NULL, 
-	sha256 VARCHAR(64) NOT NULL, 
-	name TEXT NOT NULL, 
-	kind VARCHAR(20) NOT NULL, 
-	synthetic BOOLEAN NOT NULL, 
-	PRIMARY KEY (id), 
+	id VARCHAR(36) NOT NULL,
+	sha256 VARCHAR(64) NOT NULL,
+	name TEXT NOT NULL,
+	kind VARCHAR(20) NOT NULL,
+	synthetic BOOLEAN NOT NULL,
+	PRIMARY KEY (id),
 	UNIQUE (sha256)
 );
 
 CREATE TABLE core.customers (
-	id VARCHAR(36) NOT NULL, 
-	source_system VARCHAR(80) NOT NULL, 
-	external_key VARCHAR(100) NOT NULL, 
-	name TEXT NOT NULL, 
-	PRIMARY KEY (id), 
+	id VARCHAR(36) NOT NULL,
+	source_system VARCHAR(80) NOT NULL,
+	external_key VARCHAR(100) NOT NULL,
+	name TEXT NOT NULL,
+	PRIMARY KEY (id),
 	UNIQUE (source_system, external_key)
 );
 
 CREATE TABLE core.documents (
-	id VARCHAR(36) NOT NULL, 
-	sha256 VARCHAR(64) NOT NULL, 
-	path TEXT NOT NULL, 
-	page_count INTEGER NOT NULL, 
-	synthetic BOOLEAN NOT NULL, 
-	PRIMARY KEY (id), 
-	CHECK (page_count > 0), 
+	id VARCHAR(36) NOT NULL,
+	sha256 VARCHAR(64) NOT NULL,
+	path TEXT NOT NULL,
+	page_count INTEGER NOT NULL,
+	synthetic BOOLEAN NOT NULL,
+	PRIMARY KEY (id),
+	CHECK (page_count > 0),
 	UNIQUE (sha256)
 );
 
 CREATE TABLE staging.tracker_rows (
-	id VARCHAR(36) NOT NULL, 
-	run_id VARCHAR(36) NOT NULL, 
-	source_id VARCHAR(36) NOT NULL, 
-	sheet VARCHAR(100) NOT NULL, 
-	row_number INTEGER NOT NULL, 
-	payload JSON NOT NULL, 
-	PRIMARY KEY (id), 
-	FOREIGN KEY(run_id) REFERENCES ops.ingestion_runs (id), 
+	id VARCHAR(36) NOT NULL,
+	run_id VARCHAR(36) NOT NULL,
+	source_id VARCHAR(36) NOT NULL,
+	sheet VARCHAR(100) NOT NULL,
+	row_number INTEGER NOT NULL,
+	payload JSON NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(run_id) REFERENCES ops.ingestion_runs (id),
 	FOREIGN KEY(source_id) REFERENCES staging.source_files (id)
 );
 
 CREATE TABLE core.orders (
-	id VARCHAR(36) NOT NULL, 
-	source_system VARCHAR(80) NOT NULL, 
-	order_number VARCHAR(80) NOT NULL, 
-	shipment_number VARCHAR(80) NOT NULL, 
-	customer_id VARCHAR(36) NOT NULL, 
-	ship_to TEXT NOT NULL, 
-	status VARCHAR(20) NOT NULL, 
-	order_date DATE, 
-	deadline DATE, 
-	requested_by TEXT NOT NULL, 
-	order_type VARCHAR(40) NOT NULL, 
-	expected_pages INTEGER, 
-	source_sheet VARCHAR(100) NOT NULL, 
-	source_id VARCHAR(36) NOT NULL, 
-	PRIMARY KEY (id), 
-	UNIQUE (source_system, order_number), 
-	UNIQUE (source_system, shipment_number), 
-	CHECK (status IN ('OPEN','COMPLETE')), 
-	CHECK (expected_pages IS NULL OR expected_pages > 0), 
-	FOREIGN KEY(customer_id) REFERENCES core.customers (id), 
+	id VARCHAR(36) NOT NULL,
+	source_system VARCHAR(80) NOT NULL,
+	order_number VARCHAR(80) NOT NULL,
+	shipment_number VARCHAR(80) NOT NULL,
+	customer_id VARCHAR(36) NOT NULL,
+	ship_to TEXT NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	order_date DATE,
+	deadline DATE,
+	requested_by TEXT NOT NULL,
+	order_type VARCHAR(40) NOT NULL,
+	expected_pages INTEGER,
+	source_sheet VARCHAR(100) NOT NULL,
+	source_id VARCHAR(36) NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (source_system, order_number),
+	UNIQUE (source_system, shipment_number),
+	CHECK (status IN ('OPEN','COMPLETE')),
+	CHECK (expected_pages IS NULL OR expected_pages > 0),
+	FOREIGN KEY(customer_id) REFERENCES core.customers (id),
 	FOREIGN KEY(source_id) REFERENCES staging.source_files (id)
 );
 
 CREATE TABLE core.document_pages (
-	id VARCHAR(36) NOT NULL, 
-	document_id VARCHAR(36) NOT NULL, 
-	page_number INTEGER NOT NULL, 
-	PRIMARY KEY (id), 
-	UNIQUE (document_id, page_number), 
-	CHECK (page_number > 0), 
+	id VARCHAR(36) NOT NULL,
+	document_id VARCHAR(36) NOT NULL,
+	page_number INTEGER NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (document_id, page_number),
+	CHECK (page_number > 0),
 	FOREIGN KEY(document_id) REFERENCES core.documents (id)
 );
 
 CREATE TABLE staging.rejected_rows (
-	id VARCHAR(36) NOT NULL, 
-	raw_row_id VARCHAR(36) NOT NULL, 
-	reason TEXT NOT NULL, 
-	PRIMARY KEY (id), 
+	id VARCHAR(36) NOT NULL,
+	raw_row_id VARCHAR(36) NOT NULL,
+	reason TEXT NOT NULL,
+	PRIMARY KEY (id),
 	FOREIGN KEY(raw_row_id) REFERENCES staging.tracker_rows (id)
 );
 
 CREATE TABLE core.order_document_pages (
-	id VARCHAR(36) NOT NULL, 
-	order_id VARCHAR(36) NOT NULL, 
-	page_id VARCHAR(36) NOT NULL, 
-	method VARCHAR(30) NOT NULL, 
-	PRIMARY KEY (id), 
-	UNIQUE (order_id, page_id, method), 
-	CHECK (method IN ('synthetic_manifest','azure_ocr')), 
-	FOREIGN KEY(order_id) REFERENCES core.orders (id), 
+	id VARCHAR(36) NOT NULL,
+	order_id VARCHAR(36) NOT NULL,
+	page_id VARCHAR(36) NOT NULL,
+	method VARCHAR(30) NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (order_id, page_id, method),
+	CHECK (method IN ('synthetic_manifest','azure_ocr')),
+	FOREIGN KEY(order_id) REFERENCES core.orders (id),
 	FOREIGN KEY(page_id) REFERENCES core.document_pages (id)
 );
 
 CREATE TABLE ops.ocr_attempts (
-	id VARCHAR(36) NOT NULL, 
-	page_id VARCHAR(36) NOT NULL, 
-	started_at TIMESTAMP WITH TIME ZONE NOT NULL, 
-	finished_at TIMESTAMP WITH TIME ZONE, 
-	provider VARCHAR(40) NOT NULL, 
-	status VARCHAR(20) NOT NULL, 
-	identifier VARCHAR(80), 
-	error_code VARCHAR(80), 
-	PRIMARY KEY (id), 
-	CHECK (status IN ('running','success','no_match','error')), 
+	id VARCHAR(36) NOT NULL,
+	page_id VARCHAR(36) NOT NULL,
+	started_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	finished_at TIMESTAMP WITH TIME ZONE,
+	provider VARCHAR(40) NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	identifier VARCHAR(80),
+	error_code VARCHAR(80),
+	PRIMARY KEY (id),
+	CHECK (status IN ('running','success','no_match','error')),
 	FOREIGN KEY(page_id) REFERENCES core.document_pages (id)
 );
 
 CREATE TABLE ops.review_events (
-	id VARCHAR(36) NOT NULL, 
-	order_id VARCHAR(36) NOT NULL, 
-	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
-	status VARCHAR(20) NOT NULL, 
-	PRIMARY KEY (id), 
-	CHECK (status IN ('pending','reviewed')), 
+	id VARCHAR(36) NOT NULL,
+	order_id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	PRIMARY KEY (id),
+	CHECK (status IN ('pending','reviewed')),
 	FOREIGN KEY(order_id) REFERENCES core.orders (id)
 );

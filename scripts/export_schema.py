@@ -11,5 +11,5 @@ engine = create_mock_engine("postgresql+psycopg://", lambda sql, *a, **kw: state
 metadata.create_all(engine, checkfirst=False)
 if __name__ == "__main__":
     target = Path(__file__).resolve().parents[1] / "database/001_initial.sql"
-    target.write_text("\n\n".join(statements) + "\n")
+    target.write_text("\n".join(line.rstrip() for line in "\n\n".join(statements).splitlines()) + "\n")
     print(target)
