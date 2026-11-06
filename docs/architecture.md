@@ -1,10 +1,16 @@
 # Architecture
 
-Status: current implementation at initial public revision `8b80f63`, reviewed 2026-11-06. Proposed changes appear in [ADR 0001](decisions/0001-modular-monolith.md).
+Status: the diagram and legacy startup flow below describe the original signed-in application. The feature branch adds the SQL data layer and separate synthetic preview described here and in the [database/ETL guide](data-pipeline.md).
+
+## SQL data layer and synthetic preview
+
+`storage.py` defines constrained relational tables and the initial migration for PostgreSQL/SQLite. `etl.py` extracts and validates trackers, stages source rows, quarantines invalid rows, and upserts business records. `processing.py` registers PDFs and records page-level OCR attempts/retries. `demo_app.py` reads the isolated synthetic SQL database, without sign-in or Azure calls. The original `data_loader.py` selects SQL orders when `DATABASE_URL` is set; its legacy scan/review/download state remains file backed.
+
+See [ADR 0002](decisions/0002-relational-store-and-etl.md) for the accepted direction and remaining migration work.
 
 ## Purpose and scope
 
-Match delivery-ticket pages to workbook orders, provide local PDFs and previews, and show order/customer status in Streamlit. Excel remains the order source of truth. The application has no public API, database, background worker, or built-in deployment platform.
+Match delivery-ticket pages to workbook orders, provide local PDFs and previews, and show order/customer status in Streamlit. Excel remains the order source of truth. The legacy workflow has no public API or background worker. The new SQL pipeline is described above.
 
 ## System context
 

@@ -2,10 +2,15 @@
 
 Run commands from the repository root. Copy `.env.example` to `.env` and supply your own resources. Never place real secrets in a Google Doc, issue, recording, or commit.
 
+The live app and standalone pipeline load `.env`; the synthetic preview uses isolated local storage without loading live credentials. See [the data-pipeline guide](data-pipeline.md).
+
 ## Environment variables
 
 | Variable | Purpose | Requirement/default |
 | --- | --- | --- |
+| `DATABASE_URL` | SQL store URL; blank retains legacy Excel order reads | Optional in live app; required by pipeline CLI |
+| `POSTGRES_PASSWORD` | Local Compose PostgreSQL password | Required only for Compose |
+| `DEMO_DATABASE_PATH` | Override local synthetic preview DB path | Defaults to `demo_runtime/demo.sqlite` |
 | `AZURE_TENANT_ID` | Microsoft Entra tenant | Required for sign-in |
 | `AZURE_CLIENT_ID` | Entra confidential application client | Required for sign-in |
 | `AZURE_CLIENT_SECRET` | Entra client secret | Required for sign-in |

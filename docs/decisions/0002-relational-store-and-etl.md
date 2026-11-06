@@ -1,6 +1,6 @@
 # ADR 0002: Use PostgreSQL for application data and retain Excel at the boundary
 
-Status: Proposed
+Status: Accepted direction; initial implementation on feature branch
 
 Date: 2026-11-06
 
@@ -8,7 +8,7 @@ Decider: Repository owner
 
 ## Context
 
-The current application reads Excel directly and stores OCR associations and workflow flags in JSON/pickle files. The generated demo includes 120 distinct tickets and 1,050 pages across three datasets, each with a corresponding tracker. A database adapter, migration system, and ETL loader have not been implemented.
+The current application reads Excel directly and stores OCR associations and workflow flags in JSON/pickle files. The generated demo includes 120 distinct tickets and 1,050 pages across three datasets, each with a corresponding tracker. The feature branch now adds the initial adapter, migration, ETL loader, and synthetic preview.
 
 The portfolio should demonstrate a working document-processing and data-engineering workflow. A database contributes useful behavior when it provides validated relationships, repeatable ingestion, queryable processing history, and reliable updates. The dataset size alone does not require a database.
 
@@ -36,7 +36,7 @@ PostgreSQL is the proposed portfolio target because it supports the intended sha
 | `core` | `customers`, `orders`, `documents`, `document_pages`, `order_document_pages` | Validated business entities and document associations |
 | `ops` | `ingestion_runs`, `ocr_attempts`, `review_events` | Load outcomes, OCR attempts/retries, review history |
 
-These are design proposals, not existing database tables.
+These logical tables now exist in the initial SQLAlchemy model. The implementation and remaining limits are documented in [the data-pipeline guide](../data-pipeline.md).
 
 ```mermaid
 erDiagram
@@ -45,7 +45,7 @@ erDiagram
     ORDERS ||--o{ ORDER_DOCUMENT_PAGES : matches
     DOCUMENT_PAGES ||--o{ ORDER_DOCUMENT_PAGES : associated_with
     DOCUMENT_PAGES ||--o{ OCR_ATTEMPTS : processed_by
-    INGESTION_RUNS ||--o{ SOURCE_FILES : ingests
+    INGESTION_RUNS ||--o{ TRACKER_ROWS : loads
     SOURCE_FILES ||--o{ TRACKER_ROWS : provides
     ORDERS ||--o{ REVIEW_EVENTS : reviewed_through
 ```
@@ -91,6 +91,10 @@ OCR processing should record page-level success, no-match, or error independentl
 Use the conventional term **Optical Character Recognition**. Prefer user-facing names such as **Order Reconciliation**, **Document Processing**, **Review Queue**, and **Processing History**. Document implemented behavior separately from proposals. Rename the legacy `ADK_Agentic` package only in a scoped refactor that updates imports, startup commands, tests, and documentation together.
 
 Keep changes on feature branches with pull requests. Do not push development changes directly to `main`.
+
+## Initial implementation status
+
+Implemented: constrained PostgreSQL/SQLite model, initial migration, transactional partial-load ETL, source/run history, synthetic manifest registration, PDF registration, page-level OCR attempts/retry CLI, SQL order adapter, and isolated local preview. The preview is running on SQLite. PostgreSQL integration is covered by a dedicated CI service; live Azure and sign-in require owner configuration. The legacy scan/review/download interface still uses files, and no background worker has been added.
 
 ## Resume evidence
 

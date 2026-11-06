@@ -1,5 +1,5 @@
 """
-Object Character Recognition (OCR) — Streamlit HTML View
+Optical Character Recognition (OCR) — Streamlit HTML View
 Manage work orders, view tickets, and track downloaded PDFs.
 Run: streamlit run ADK_Agentic/streamlit_app.py
 """
@@ -119,7 +119,7 @@ def _save_review_status(order_key: str, status: str):
 
 # --- Page Config ---
 st.set_page_config(
-    page_title="Object Character Recognition (OCR)",
+    page_title="Optical Character Recognition (OCR)",
     page_icon="🏗️",
     layout="wide",
 )
@@ -191,7 +191,7 @@ elif "user" not in st.session_state:
             redirect_uri=AZURE_REDIRECT_URI,
             state=_oauth_state,
         )
-        st.title("Object Character Recognition (OCR)")
+        st.title("Optical Character Recognition (OCR)")
         st.link_button("Sign in with Microsoft →", _auth_url)
         st.stop()
 # Authenticated below — carry on.
@@ -253,7 +253,7 @@ startup_slot.empty()
 
 
 # --- Sidebar Navigation ---
-st.sidebar.title("Object Character Recognition (OCR)")
+st.sidebar.title("Optical Character Recognition (OCR)")
 
 _current_user = st.session_state["user"]
 st.sidebar.caption(f"👤 **{_current_user['name']}**")

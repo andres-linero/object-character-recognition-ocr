@@ -1,10 +1,26 @@
-# Object Character Recognition (OCR)
+# Optical Character Recognition (OCR)
 
-A Streamlit dashboard that matches scanned delivery tickets to an Excel order tracker using Azure AI Document Intelligence. OCR conventionally means **Optical Character Recognition**; the project display name follows the requested name.
+A Streamlit dashboard that matches scanned delivery tickets to an Excel order tracker using Azure AI Document Intelligence.
 
 [See the workflow clips](#video-clips) for scan intake and incremental indexing.
 
-## Recreate locally
+## Run the local demo
+
+No API key is needed for the synthetic preview. Install dependencies in an activated Python environment:
+
+```sh
+python3 -m pip install -r requirements.txt -r requirements-data.txt
+# If the generated datasets are not present:
+python3 scripts/create_demo_data.py --count 100 --seed 42 --output demo_data
+python3 scripts/prepare_demo.py
+sh scripts/run_demo.sh
+```
+
+Open **http://127.0.0.1:8502**. The preview reads normalized SQL tables, provides order search, previews synthetic PDFs, and shows validation/ingestion history. It uses isolated SQLite storage for local setup. Manifest expectations are labeled separately from actual OCR results. The preview never calls Azure or loads live credentials.
+
+PostgreSQL schemas, transactional Excel/CSV ETL, document registration, and page-level OCR/retry operations are available through the data pipeline. See the [database and ETL guide](docs/data-pipeline.md) for PostgreSQL setup and verification limits.
+
+## Run with Microsoft sign-in and Azure OCR
 
 Requires Python 3.11 or 3.12, an Azure Document Intelligence resource, and a Microsoft Entra app registration for sign-in.
 
@@ -18,7 +34,7 @@ python scripts/create_sample_data.py
 streamlit run ADK_Agentic/streamlit_app.py
 ```
 
-Register `http://localhost:8501` as a web redirect URI in Entra, create a client secret, and supply the tenant ID, client ID, and secret. Authentication remains mandatory; there is no anonymous demo mode. Key Vault is optional and requires `AZURE_KEY_VAULT_URL` plus appropriate Azure identity access.
+Register `http://localhost:8501` as a web redirect URI in Entra, create a client secret, and supply the tenant ID, client ID, and secret. Authentication remains mandatory in the live app. The separate synthetic preview requires no sign-in. Key Vault is optional and requires `AZURE_KEY_VAULT_URL` plus appropriate Azure identity access.
 
 The sample script generates a fictional workbook and PDF. Replace `EXCEL_PATH` and place your own ticket PDFs in `Scans/incoming_scans/` when ready. Workbook columns include `Order_ID`, `SO`, `Customer_name`, `Ship_to`, and `Status`; monthly sheets are combined. Optional tracker columns enable additional dashboard views.
 
