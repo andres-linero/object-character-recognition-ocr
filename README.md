@@ -38,6 +38,10 @@ Register `http://localhost:8501` as a web redirect URI in Entra, create a client
 
 The sample script generates a fictional workbook and PDF. Replace `EXCEL_PATH` and place your own ticket PDFs in `Scans/incoming_scans/` when ready. Workbook columns include `Order_ID`, `SO`, `Customer_name`, `Ship_to`, and `Status`; monthly sheets are combined. Optional tracker columns enable additional dashboard views.
 
+## Live OCR validation
+
+The two new synthetic batches passed live Azure verification: **120/120 pages matched their expected shipment IDs**, across 20 tickets, with no mismatches or provider errors. See the [method, evidence, and limitations](docs/ocr-validation-results.md).
+
 ## Full demo dataset
 
 Generate 100 fictional ticket packets with 6, 9, or 12 pages each, including equipment, demo terms, and acknowledgement papers:

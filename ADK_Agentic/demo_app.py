@@ -1,6 +1,7 @@
 """Local synthetic-data preview. Separate from authenticated/live Azure execution."""
 from pathlib import Path
 import os
+import json
 import sys
 
 import fitz
@@ -17,7 +18,16 @@ ALLOWED_ROOTS = [ROOT / "demo_data", ROOT / "demo_batches"]
 
 st.set_page_config(page_title="OCR Document Processing | Demo", page_icon="📄", layout="wide")
 st.title("OCR Document Processing")
-st.info("Synthetic demo • local SQL database • no Azure calls or Microsoft sign-in. Page associations are manifest expectations, not measured OCR results.")
+st.info("Synthetic documents • local SQL database • this viewer makes no Azure calls or Microsoft sign-in requests. Manifest pages are expected associations; OCR verified pages are completed provider matches.")
+if not os.getenv("DEMO_DATABASE_PATH"):
+    datasets = {"Full synthetic dataset": ROOT / "demo_runtime/demo.sqlite"}
+    validation_database = ROOT / "demo_runtime/ocr_validation.sqlite"
+    if validation_database.exists():
+        datasets["Azure OCR validation — new batches"] = validation_database
+    selected_dataset = st.sidebar.selectbox("Dataset", list(datasets), index=len(datasets) - 1)
+    DATABASE = datasets[selected_dataset]
+if st.sidebar.button("Refresh results"):
+    st.rerun()
 if not DATABASE.exists():
     st.error("Prepare the demo first: python3 scripts/prepare_demo.py")
     st.stop()
@@ -36,6 +46,18 @@ for column, label, value in zip(metrics, ["Orders", "Registered pages", "OCR att
                                  [counts["orders"], counts["document_pages"], counts["ocr_attempts"], counts["rejected_rows"]]):
     column.metric(label, value)
 st.caption("Excel/CSV → validation and staging → normalized SQL tables → dashboard. SQLite runs this preview; PostgreSQL is the shared-storage target.")
+
+report_path = ROOT / "demo_runtime/ocr_validation_report.json"
+if DATABASE.resolve() == (ROOT / "demo_runtime/ocr_validation.sqlite").resolve() and report_path.exists():
+    report = json.loads(report_path.read_text())
+    total = report["total_pages"]
+    processed = total - report["pending"]
+    st.progress(processed / total if total else 0,
+                text=f"Azure validation: {report['passed']}/{total} passed · {report['mismatch']} mismatches · {report['error']} errors · {report['pending']} pending")
+    csv_path = report_path.with_suffix(".csv")
+    if csv_path.exists():
+        st.download_button("Download page-by-page validation report", csv_path.read_bytes(), "ocr_validation.csv", "text/csv")
+
 orders_tab, documents_tab, quality_tab, history_tab = st.tabs(["Order Reconciliation", "Document Preview", "Data Quality", "Ingestion History"])
 with orders_tab:
     frame = pd.DataFrame(store.order_rows())

@@ -64,7 +64,8 @@ def process_page(store, page_id, source_system="tracker", extractor=None):
             connection.execute(db.attempts.update().where(db.attempts.c.id == attempt_id).values(
                 status=status, identifier=identifier, error_code=error, finished_at=db.utcnow()))
     except Exception as exc:
-        status, error = "error", type(exc).__name__
+        http_status = getattr(exc, "status_code", None)
+        status, error = "error", f"HTTP{http_status}" if isinstance(http_status, int) else type(exc).__name__
         with store.engine.begin() as connection:
             connection.execute(db.attempts.update().where(db.attempts.c.id == attempt_id).values(
                 status=status, error_code=error, finished_at=db.utcnow()))

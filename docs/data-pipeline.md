@@ -103,3 +103,20 @@ The initial migration is not a general-purpose migration framework. The legacy d
 - [SQLAlchemy engine configuration](https://docs.sqlalchemy.org/en/20/core/engines.html)
 - [SQLAlchemy transactions](https://docs.sqlalchemy.org/en/20/core/connections.html)
 - [Azure Document Intelligence SDK quickstart](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/quickstarts/get-started-sdks-rest-api?view=doc-intel-4.0.0)
+
+## Verify the two new batches through Azure
+
+The dedicated validator stages copies of the two generated 60-page batches under `demo_batches/ocr_validation/incoming_scans/`, combines their tracker rows, and uses an isolated SQLite database. The original PDF packets and the full-demo database are preserved. It does not require Entra sign-in or a PostgreSQL server.
+
+```sh
+python3 scripts/validate_ocr.py --prepare-only
+python3 scripts/validate_ocr.py --limit 1
+# After the smoke test passes, process the remaining pages:
+python3 scripts/validate_ocr.py --limit 120
+```
+
+Configure the Azure endpoint/key in local `.env`. The first provider result must match its expected shipment before additional pages are submitted. Existing completed attempts are reused; `--retry-errors` explicitly retries failed attempts. Access failures or three consecutive provider errors stop the run. Requests are sequential and separated by a pause; the SDK handles provider polling/retries. Azure usage charges may apply.
+
+The validator compares every returned identifier against page-specific manifest ground truth, including a wrong identifier that happens to match a different valid order. JSON and CSV reports record passed, mismatch, error, and pending counts, plus expected/actual identifiers. Credentials, endpoints, and raw OCR text are excluded. Reports remain local in `demo_runtime/ocr_validation_report.json` and `.csv`.
+
+At http://127.0.0.1:8502, select **Azure OCR validation — new batches** and click **Refresh results** to see current attempts, verified associations, and validation progress. The viewer does not initiate Azure calls. The new-batch database contains 20 distinct tickets and 120 pages; it is separate from the full 120-ticket/1,050-page fixture set.
