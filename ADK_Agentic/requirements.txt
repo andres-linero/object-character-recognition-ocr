@@ -1,0 +1,25 @@
+# Object Character Recognition (OCR) — install: pip install -r requirements.txt
+
+# App
+streamlit>=1.37.0
+
+# Data
+pandas>=2.0.0
+openpyxl>=3.1.0
+python-dotenv>=1.0.0
+
+# PDF / OCR
+pymupdf>=1.24.0
+pillow>=10.0.0
+azure-ai-documentintelligence>=1.0.0
+azure-core>=1.30.0
+
+# Authentication (Microsoft Entra ID SSO)
+msal>=1.28.0
+
+# Analytics charts on the Analysis Table page
+altair>=5.0.0
+
+# Optional: Azure Key Vault (set USE_AZURE_KEYVAULT=1 in production)
+azure-identity>=1.15.0
+azure-keyvault-secrets>=4.7.0

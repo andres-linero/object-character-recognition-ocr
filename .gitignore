@@ -1,0 +1,72 @@
+# Environment
+agents_env/
+.env
+*.env.*
+
+# Streamlit secrets — never commit credentials
+.streamlit/secrets.toml
+.streamlit/secrets.toml.example
+.streamlit/*.bak
+# Python
+__pycache__/
+*.pyc
+*practice*.py
+*Practice*.py
+
+# OS
+.DS_Store
+Gen_AI/Clients practice for OCR.xlsx
+
+# IDE / Tools
+.adk/
+.vscode/
+.claude/
+
+# Data files (local only)
+Scans/
+*.xlsx
+*.pdf
+
+
+# Generated at runtime
+ADK_Agentic/cache/
+ADK_Agentic/output/
+ADK_Agentic/upload_ready/
+ADK_Agentic/logs/
+ADK_Agentic/streamlit.log
+ADK_Agentic/streamlit.log.err
+
+# Notebooks
+*.ipynb
+
+# Deployment (local)
+start.sh
+audit_logs/
+
+#RN
+*.log
+*.log.err
+~$*.xlsx
+~$*.xlsm
+~$*.xls
+
+# Test/runtime caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Windows system files
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+.ngrok2/
+
+.venv/
+.env.*
+!.env.example
+!*.env.example
