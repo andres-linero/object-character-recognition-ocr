@@ -22,6 +22,16 @@ Register `http://localhost:8501` as a web redirect URI in Entra, create a client
 
 The sample script generates a fictional workbook and PDF. Replace `EXCEL_PATH` and place your own ticket PDFs in `Scans/incoming_scans/` when ready. Workbook columns include `Order_ID`, `SO`, `Customer_name`, `Ship_to`, and `Status`; monthly sheets are combined. Optional tracker columns enable additional dashboard views.
 
+## Full demo dataset
+
+Generate 100 fictional ticket packets with 6, 9, or 12 pages each, including equipment, demo terms, and acknowledgement papers:
+
+```sh
+python scripts/create_demo_data.py --count 100 --seed 42 --output demo_data
+```
+
+The generator produces scanned-style PDFs, a matching Excel/CSV tracker, and a reproducibility manifest. It uses entirely fictional data, leaves the reference PDF untouched, and makes no Azure calls. See the [demo-data guide](docs/demo-data.md) for options and dashboard setup.
+
 ## Data and privacy
 
 The default OCR crop sends the top-right half of the top quarter of each page to Azure. A geometric crop cannot guarantee that personal information is absent: inspect your document layout first. The OCR utility also exposes an uncropped option. Local workbooks, PDFs, caches, outputs, credentials, and virtual environments are excluded from Git. Use trusted local cache files only: the Excel cache uses Python pickle.

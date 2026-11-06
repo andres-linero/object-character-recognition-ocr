@@ -70,3 +70,6 @@ $RECYCLE.BIN/
 .env.*
 !.env.example
 !*.env.example
+
+# Generated synthetic demo datasets
+/demo_data/

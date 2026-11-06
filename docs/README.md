@@ -5,6 +5,7 @@ Start with the [project README](../README.md) to install and launch the app.
 | Document | Purpose |
 | --- | --- |
 | [Architecture](architecture.md) | Current components, data flow, deployment boundary, and limitations |
+| [Synthetic demo dataset](demo-data.md) | Generate 100 fictional packets and a matching tracker |
 | [Configuration and data](configuration.md) | Environment variables, workbook schema, and generated files |
 | [Operations](operations.md) | Startup, diagnosis, recovery, and retention |
 | [ADR 0001](decisions/0001-modular-monolith.md) | Proposed architecture direction and implementation stages |
