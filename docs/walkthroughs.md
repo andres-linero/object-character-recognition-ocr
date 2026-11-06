@@ -1,13 +1,24 @@
 # Walkthrough videos
 
-Two local recordings were supplied and eight frames per recording were inspected at evenly spaced timestamps. These notes are a sampled visual review, not a full-frame review or audio transcript. Both files contain an audio track; audio has not been reviewed. Neither recording has been uploaded, shared, or committed.
+The README includes two short, silent GIF clips derived from the supplied recordings. GIFs render inline without an external video host. Only the edited clips are committed; the source MP4s and temporary review frames remain local.
+
+## Published clips
+
+| Clip | Source recording | Source interval | Editing |
+| --- | --- | --- | --- |
+| [Scan intake](media/scan-intake.gif) | Recording dated 2026-10-22 | 00:20–00:31 | Cropped to the file panel, excluding the account sidebar and desktop |
+| [Incremental indexing](media/incremental-indexing.gif) | Screen recording dated 2026-10-21 | 00:00–00:18 | Only cache, reload, completion-summary, and changed-file-count log lines retained; other content concealed; retained source pixels arranged as a compact log panel |
+
+Both clips use four frames per second, loop, and contain no audio. The log counts are historical observations, not performance claims. The clips do not demonstrate current authentication behavior. The intake recording shows a historical ID-related folder name; ID collection is outside the current application scope.
+
+Each emitted frame was checked with text recognition; representative exported frames were visually inspected. Text recognition is a supporting check, not a guarantee. The intake crop excludes the desktop/account sidebar on every emitted frame. The indexing export reveals only approved summary-line categories. Source audio is omitted entirely.
 
 ## Supplied recordings
 
 | Recording | Duration | Sampled visual content | Public-release disposition |
 | --- | --- | --- | --- |
-| Recording dated 2026-10-22 | 00:32.33 | Windows desktop and scan-folder intake | Redact employee/company account labels and private context, or re-record using synthetic files |
-| Screen recording dated 2026-10-21 | 04:40.30 | PowerShell OCR/indexing logs and cache reuse | Replace operational identifiers/filenames with synthetic examples and review audio |
+| Recording dated 2026-10-22 | 00:32.33 | Windows desktop and scan-folder intake | Only the cropped intake excerpt is published; the original remains local |
+| Screen recording dated 2026-10-21 | 04:40.30 | PowerShell OCR/indexing logs and cache reuse | Only the redacted summary-log excerpt is published; the original remains local |
 
 Approximate visual anchors, based on sampled frames:
 
@@ -20,9 +31,9 @@ Approximate visual anchors, based on sampled frames:
 
 These recordings predate the public copy. Folder names and displayed totals are historical observations, not current configuration requirements or performance benchmarks. They do not establish current sign-in behavior or show a complete dashboard walkthrough.
 
-## Public version plan
+## Future walkthroughs
 
-Recreate the intake and cache demonstration with the generated synthetic workbook/PDF, a neutral desktop/account, and generic filenames. Include successful matching and preview/download in a separate product walkthrough. Review the complete video and audio before publishing. Add an externally hosted, deliberately shared link and text summary to the README afterward. Local file paths are not useful public watch links.
+For a full product walkthrough, use synthetic inputs and a neutral account, and show matching, preview, and download. Review the complete video and audio before publishing a longer version. The existing short clips illustrate intake and cache behavior only.
 
 ## Recommended coverage
 
@@ -33,10 +44,6 @@ Recreate the intake and cache demonstration with the generated synthetic workboo
 | Architecture | UI, workbook loader, scan index, Azure boundary, local persistence | Architecture guide |
 | Troubleshooting | No-match page, wrong crop, missing configuration, safe recovery | Operations guide |
 
-## Integrating a recording
+## Maintaining clips
 
-Keep recordings hosted externally and link them from the README; do not commit large video files to Git. For each approved recording, record its title, verified URL, duration, relevant timestamps, source revision, and a short text summary or transcript so the guide remains useful without video.
-
-Use only synthetic documents and demo identities in public walkthroughs. Review frames, browser tabs, account names, paths, terminal output, and audio for credentials and private data. A private Drive video remains private even when linked from a public README; choose sharing deliberately.
-
-The README should show a short description and working watch link once supplied. Add a thumbnail only after a suitable public image and target video are available. Do not insert broken placeholder URLs.
+Keep only short edited clips in this repository. Host full-length recordings externally if needed, and link to them with deliberate sharing settings. Record the source interval, edits, and behavior shown. Do not publish raw recordings containing account details, private documents, or unreviewed audio. Provide a text explanation alongside every animation.

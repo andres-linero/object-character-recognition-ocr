@@ -2,6 +2,8 @@
 
 A Streamlit dashboard that matches scanned delivery tickets to an Excel order tracker using Azure AI Document Intelligence. OCR conventionally means **Optical Character Recognition**; the project display name follows the requested name.
 
+[See the workflow clips](#video-clips) for scan intake and incremental indexing.
+
 ## Recreate locally
 
 Requires Python 3.11 or 3.12, an Azure Document Intelligence resource, and a Microsoft Entra app registration for sign-in.
@@ -44,11 +46,24 @@ Start with the [documentation guide](docs/README.md), then use the [configuratio
 
 Use the [Google Doc architecture workspace](https://docs.google.com/document/d/19lhy8-3sdm3E9ZSVoxvQ6Cty-0Tm62eW5EJPxWn24YQ/edit?usp=drivesdk) for design discussion. Versioned repository guides remain the source of truth; synchronization is manual. The document retains its existing Drive access settings.
 
-## Video walkthroughs
+## Video clips
 
-The supplied recordings illustrate two parts of the workflow:
+Short, silent clips from the supplied recordings demonstrate scan intake and incremental indexing. These recordings predate the public copy; they show workflow behavior, not current performance benchmarks.
 
-1. **Scan intake:** place a PDF directly in the configured incoming directory. The application checks that directory during dashboard reruns.
-2. **Incremental indexing:** unchanged PDFs reuse cached associations; new or changed PDFs are OCRed page by page, then grouped into order PDFs and previews.
+### Scan intake
 
-The original recordings contain account or operational details and are not published here. See the [recording review and walkthrough plan](docs/walkthroughs.md) for approximate timestamps and the plan for public versions.
+Place scanned PDFs in the incoming scans directory. The app checks for new or changed PDFs during dashboard reruns.
+
+![Scan intake: navigating the incoming PDF folder](docs/media/scan-intake.gif)
+
+[Open scan-intake clip](docs/media/scan-intake.gif) · 11 seconds · account sidebar and desktop cropped out.
+
+### Incremental indexing
+
+Unchanged PDFs reuse their cached associations. New or changed PDFs trigger OCR; the log reports cache hits and the work that remains.
+
+![Incremental indexing: cache hits and changed-PDF detection](docs/media/incremental-indexing.gif)
+
+[Open indexing clip](docs/media/incremental-indexing.gif) · 18 seconds · operational identifiers and filenames concealed.
+
+Both clips are silent animated GIFs that play directly in the README. The original videos remain local. See [clip provenance and editing notes](docs/walkthroughs.md).
