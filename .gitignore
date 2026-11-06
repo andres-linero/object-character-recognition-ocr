@@ -82,3 +82,6 @@ $RECYCLE.BIN/
 *.sqlite-*
 *.db
 *.db-*
+
+# Web UI development dependencies
+node_modules/

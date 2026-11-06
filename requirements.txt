@@ -1,1 +1,6 @@
--r ADK_Agentic/requirements.txt
+# Product UI and SQL pipeline. Streamlit is retained only in the legacy/dev stack.
+-r requirements-web.txt
+python-dotenv>=1.0
+pillow>=10.0
+azure-ai-documentintelligence>=1.0
+azure-core>=1.30
