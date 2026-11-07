@@ -1,7 +1,6 @@
 """Extract, validate, stage and transactionally load tracker/document data."""
 from __future__ import annotations
 
-from datetime import date, datetime
 import hashlib
 import json
 from pathlib import Path

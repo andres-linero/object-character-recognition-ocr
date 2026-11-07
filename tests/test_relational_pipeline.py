@@ -2,11 +2,10 @@
 import csv
 import json
 import os
-from pathlib import Path
 
 import fitz
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.schema import CreateTable
 from sqlalchemy.dialects import postgresql
@@ -135,3 +134,24 @@ def test_postgres_ddl_has_explicit_schema_and_constraints():
     ddl = str(CreateTable(db.orders).compile(dialect=postgresql.dialect()))
     assert "core.orders" in ddl and "FOREIGN KEY" in ddl and "UNIQUE" in ddl
     assert "CHECK" in ddl
+
+
+def test_ocr_keeps_overlapping_shipment_and_work_order_namespaces_separate(store, tmp_path):
+    from ADK_Agentic.ocr import ParsedIdentifier
+    from ADK_Agentic.processing import process_page
+    rows = [dict(Order_ID="W-900001", SO="800001", Customer_name="Demo", Status="OPEN"),
+            dict(Order_ID="800001", SO="800002", Customer_name="Demo", Status="OPEN")]
+    etl.ingest_tracker(store, tracker(tmp_path / "orders.csv", rows))
+    pdf = tmp_path / "overlap.pdf"
+    with fitz.open() as doc:
+        doc.new_page()
+        doc.new_page()
+        doc.save(pdf)
+    register_pdf(store, pdf)
+    pages = store.rows(select(db.pages).order_by(db.pages.c.page_number))
+    assert process_page(store, pages[0]["id"], extractor=lambda *a, **k: "800001")["status"] == "success"
+    assert process_page(store, pages[1]["id"], extractor=lambda *a, **k: ParsedIdentifier("work_order", "800001"))["status"] == "success"
+    orders = {row["order_number"]: row["id"] for row in store.rows(select(db.orders))}
+    associations = store.rows(select(db.associations))
+    assert {(a["page_id"], a["order_id"]) for a in associations} == {
+        (pages[0]["id"], orders["W-900001"]), (pages[1]["id"], orders["800001"])}

@@ -17,6 +17,7 @@ from typing import Dict, List, Optional
 import fitz  # PyMuPDF
 
 from ocr import extract_order_number, HEADER_CROP_HEIGHT, HEADER_CROP_WIDTH
+from utils import normalize_order_token
 
 logger = logging.getLogger(__name__)
 
@@ -354,15 +355,15 @@ class ScanIndex:
         return []
 
     def _resolve_order_id(self, order_id: str) -> Optional[str]:
-        """Resolve an order ID to the key used in the index."""
-        clean_id = order_id.strip().lstrip("0") or order_id.strip()
-        if clean_id in self.index:
-            return clean_id
-        bare_id = clean_id.replace("W-", "")
-        for key in self.index:
-            if key.replace("W-", "") == bare_id:
-                return key
-        return None
+        """Resolve exact typed IDs; a shipment never aliases a W- work order."""
+        token = str(order_id).strip()
+        if token.startswith("UNMATCHED_") and token in self.index:
+            return token if Path(token).name == token and "\\" not in token else None
+        normalized = normalize_order_token(token)
+        if normalized is None:
+            return None
+        matches = [key for key in self.index if normalize_order_token(key) == normalized]
+        return matches[0] if len(matches) == 1 else None
 
     def get_scan_pdf(self, order_id: str) -> Optional[str]:
         """Get path to the pre-classified PDF for an order. Returns None if not found."""

@@ -1,5 +1,4 @@
 """Exercise product API against real SQL and generated multi-ticket source PDFs."""
-from pathlib import Path
 
 import fitz
 import pytest

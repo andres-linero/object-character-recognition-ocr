@@ -1,3 +1,5 @@
+> Historical initial-copy report. See [the current hardening audit](docs/audit-hardening.md) for dependency locks, CI, and updated verification.
+
 # PRP — Public repository preparation
 
 ## Result
