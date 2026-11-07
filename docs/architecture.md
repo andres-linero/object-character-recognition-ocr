@@ -2,6 +2,10 @@
 
 Status: the diagram and legacy startup flow below describe the original signed-in application. The feature branch adds the SQL data layer and separate synthetic preview described here and in the [database/ETL guide](data-pipeline.md).
 
+## Primary product interface
+
+The new primary UI is a static web client served by FastAPI on localhost:8700. It reads SQL order/page records through a workspace API, exposes ticket-only PDF previews/downloads, and persists human review events. The legacy Streamlit entrypoints remain for compatibility. See [the product UI guide](product-ui.md).
+
 ## SQL data layer and synthetic preview
 
 `storage.py` defines constrained relational tables and the initial migration for PostgreSQL/SQLite. `etl.py` extracts and validates trackers, stages source rows, quarantines invalid rows, and upserts business records. `processing.py` registers PDFs and records page-level OCR attempts/retries. `demo_app.py` reads the isolated synthetic SQL database, without sign-in or Azure calls. The original `data_loader.py` selects SQL orders when `DATABASE_URL` is set; its legacy scan/review/download state remains file backed.
