@@ -53,9 +53,9 @@ def test_build_index_folder_groups_pages_and_writes_outputs(tmp_path, monkeypatc
     compiled_unmatched.close()
 
     assert index.find_pages("W-1001") == [0, 1]
-    assert index.find_pages("1001") == [0, 1]
+    assert index.find_pages("1001") == []
     assert index.get_scan_pdf("W-1001") == str(order_pdf)
-    assert index.get_scan_preview("1001") == str(preview_png)
+    assert index.get_scan_preview("W-1001") == str(preview_png)
 
 
 def test_pdf_signature_uses_size_and_mtime(tmp_path):
@@ -73,3 +73,12 @@ def test_pdf_signature_uses_size_and_mtime(tmp_path):
     assert first["size"] == second["size"]
     assert scan_index.ScanIndex._signature_matches(first, second) is False
     assert scan_index.ScanIndex._signature_matches(first["size"], second) is False
+
+
+def test_scan_resolver_does_not_cross_work_order_and_shipment_namespaces(tmp_path, monkeypatch):
+    monkeypatch.setattr(scan_index, "INDEX_FILE", tmp_path / "absent.json")
+    index = scan_index.ScanIndex()
+    index.index = {"W-1001": [("work.pdf", 0)], "1001": [("shipment.pdf", 2)]}
+    assert index.find_pages("W-1001") == [0]
+    assert index.find_pages("1001") == [2]
+    assert index.find_pages("W-11001") == []

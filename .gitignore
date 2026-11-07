@@ -75,3 +75,13 @@ $RECYCLE.BIN/
 /demo_data/
 
 /demo_batches/
+
+# Local database and synthetic preview state
+/demo_runtime/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# Web UI development dependencies
+node_modules/

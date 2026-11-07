@@ -1,0 +1,70 @@
+name: Test SQL pipeline and application
+on: [pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ocr_test
+          POSTGRES_PASSWORD: local_ci_only
+          POSTGRES_DB: ocr_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ocr_test -d ocr_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://ocr_test:local_ci_only@127.0.0.1:5432/ocr_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      - run: uv run --locked ruff check ADK_Agentic scripts tests
+      - run: uv run --locked pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - run: npm test
+        working-directory: web
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      - run: uv run --locked ruff check ADK_Agentic scripts tests
+      - run: uv run --locked pytest -q
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install checksum-verified Gitleaks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          cd "$RUNNER_TEMP/gitleaks"
+          gh release download v8.30.1 --repo gitleaks/gitleaks --pattern gitleaks_8.30.1_linux_x64.tar.gz --pattern gitleaks_8.30.1_checksums.txt
+          grep ' gitleaks_8.30.1_linux_x64.tar.gz$' gitleaks_8.30.1_checksums.txt | sha256sum --check
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+      - name: Scan all fetched history with secrets redacted
+        run: '"$RUNNER_TEMP/gitleaks/gitleaks" git . --log-opts="--all" --redact=100 --no-banner'

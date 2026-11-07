@@ -1,0 +1,20 @@
+[
+  {"name":"shipment-label","text":"Delivery Ticket Shipment No. 003501","kind":"shipment","value":"3501"},
+  {"name":"split-label","text":"Delivery Ticket Shipment\nNumber\t00034567","kind":"shipment","value":"34567"},
+  {"name":"hash-label","text":"Delivery Ticket Shipment # 004321","kind":"shipment","value":"4321"},
+  {"name":"short-ship-label","text":"Delivery Ticket Ship No. 004321","kind":"shipment","value":"4321"},
+  {"name":"sales-label","text":"Delivery Ticket Sale No. 003456","kind":"shipment","value":"3456"},
+  {"name":"so-label","text":"Delivery Ticket SO: 003456","kind":"shipment","value":"3456"},
+  {"name":"legacy-so-label","text":"Delivery Ticket S/O 003456","kind":"shipment","value":"3456"},
+  {"name":"work-prefix","text":"Delivery Ticket Work Order No. W-108624","kind":"work_order","value":"W-108624"},
+  {"name":"work-lowercase","text":"Delivery ticket Work Order No. w-108624","kind":"work_order","value":"W-108624"},
+  {"name":"numeric-work-order","text":"Delivery Ticket Work Order No. 001234","kind":"work_order","value":"1234"},
+  {"name":"shipment-wins-explicit","text":"Delivery Ticket Work Order W-108624 Shipment No. 003501","kind":"shipment","value":"3501"},
+  {"name":"confirmation-number","text":"Shipment Confirmation 003452","kind":"shipment","value":"3452"},
+  {"name":"postal-not-id","text":"Shipment confirmation Demo Depot postal code 12345","kind":null,"value":null},
+  {"name":"year-not-id","text":"Shipment confirmation printed date 2030","kind":null,"value":null},
+  {"name":"customer-code-not-id","text":"Shipment confirmation Customer C000837","kind":null,"value":null},
+  {"name":"non-ticket","text":"Random cover notes only 123456","kind":null,"value":null},
+  {"name":"three-digit-fragment","text":"Delivery Ticket Shipment No. 837","kind":null,"value":null},
+  {"name":"overlong-shipment","text":"Delivery Ticket Shipment No. 123456789","kind":null,"value":null}
+]

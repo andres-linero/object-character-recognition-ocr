@@ -1,0 +1,13 @@
+{
+  "name": "ocr-workspace-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check app.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0",
+    "prettier": "3.6.2"
+  }
+}

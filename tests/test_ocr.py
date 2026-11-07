@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -65,3 +67,12 @@ def test_missing_credentials_raises(monkeypatch):
     monkeypatch.delenv("AZURE_DOC_INTEL_KEY", raising=False)
     with pytest.raises(RuntimeError):
         ocr.extract_order_number(b"unused", crop_header=False)
+
+
+@pytest.mark.parametrize("case", json.loads(
+    (Path(__file__).parent / "fixtures/ocr_golden.json").read_text()),
+    ids=lambda case: case["name"])
+def test_golden_identifiers_keep_namespace_and_reject_noise(case):
+    result = ocr.parse_identifier(case["text"])
+    assert (result.kind if result else None) == case["kind"]
+    assert (result.value if result else None) == case["value"]

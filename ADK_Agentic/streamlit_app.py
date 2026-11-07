@@ -1,5 +1,5 @@
 """
-Object Character Recognition (OCR) — Streamlit HTML View
+Optical Character Recognition (OCR) — Streamlit HTML View
 Manage work orders, view tickets, and track downloaded PDFs.
 Run: streamlit run ADK_Agentic/streamlit_app.py
 """
@@ -27,9 +27,9 @@ load_secrets()
 
 import streamlit as st
 
-from scan_index import get_scan_index, SCANS_DIR, cleanup_old_files
+from scan_index import get_scan_index, cleanup_old_files
 from data_loader import get_data_loader
-from utils import pdf_name as pdf_name_fn
+from utils import pdf_name as pdf_name_fn, find_compiled_pdfs
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -119,7 +119,7 @@ def _save_review_status(order_key: str, status: str):
 
 # --- Page Config ---
 st.set_page_config(
-    page_title="Object Character Recognition (OCR)",
+    page_title="Optical Character Recognition (OCR)",
     page_icon="🏗️",
     layout="wide",
 )
@@ -191,7 +191,7 @@ elif "user" not in st.session_state:
             redirect_uri=AZURE_REDIRECT_URI,
             state=_oauth_state,
         )
-        st.title("Object Character Recognition (OCR)")
+        st.title("Optical Character Recognition (OCR)")
         st.link_button("Sign in with Microsoft →", _auth_url)
         st.stop()
 # Authenticated below — carry on.
@@ -253,7 +253,7 @@ startup_slot.empty()
 
 
 # --- Sidebar Navigation ---
-st.sidebar.title("Object Character Recognition (OCR)")
+st.sidebar.title("Optical Character Recognition (OCR)")
 
 _current_user = st.session_state["user"]
 st.sidebar.caption(f"👤 **{_current_user['name']}**")
@@ -344,8 +344,7 @@ def view_order_index():
         has_ticket = bool(scan_pages)
 
         lookup_id = order_id if order_id and order_id.lower() != "nan" else so
-        safe_lookup_id = _safe_order_token(lookup_id)
-        compiled_files = list(OUTPUT_DIR.glob(f"*{safe_lookup_id}*")) if safe_lookup_id else []
+        compiled_files = find_compiled_pdfs(OUTPUT_DIR, lookup_id)
         has_compiled = len(compiled_files) > 0
         has_id = False
         page_count = len(scan_pages)
@@ -394,8 +393,7 @@ def view_order_index():
 
         # In-memory check — see comment in the Excel loop above
         has_ticket = bool(pages)
-        safe_scan_id = _safe_order_token(scan_id)
-        compiled_files = list(OUTPUT_DIR.glob(f"*{safe_scan_id}*")) if safe_scan_id else []
+        compiled_files = find_compiled_pdfs(OUTPUT_DIR, scan_id)
         has_id = False
 
         order_data.append({
@@ -418,7 +416,7 @@ def view_order_index():
         })
 
     if not order_data:
-        st.info("No orders indexed yet. Click 'Refresh Orders' in the sidebar.")
+        st.info("No orders are loaded. Check EXCEL_PATH and the incoming scans folder, then rerun the page.")
         return
 
     # ── Month scope: applied BEFORE metrics, bulk download, and buckets ──
@@ -730,6 +728,8 @@ def view_order_index():
             dl_payload = (compiled_path, dl_filename, "compiled")
         elif show_ticket_dl and o.get("in_excel") and o.get("has_ticket"):
             ticket_path = scan_index.get_scan_pdf(o["order_id"])
+            if not ticket_path and o.get("so") not in (None, "", "—"):
+                ticket_path = scan_index.get_scan_pdf(o["so"])
             if ticket_path and os.path.exists(ticket_path):
                 order = data_loader.get_order_by_id(o["order_id"])
                 base = pdf_name_fn(order) if order else o["order_id"]
@@ -820,7 +820,7 @@ def view_order_index():
             key="order_search",
         )
     with col_month:
-        month_filter = st.selectbox(
+        st.selectbox(
             "Month",
             options=month_options,
             index=month_options.index(selected_month) if selected_month in month_options else 0,
@@ -1737,7 +1737,6 @@ def view_ocr_debug():
         key=lambda g: g["name"].lower(),
     )
     active_orders = [o for g in active_groups for o in g["orders"]]
-    all_orders = [o for g in source_groups.values() for o in g["orders"]]
     active_unmatched = [r for r in unmatched_records if r["on_disk"]]
     removed_unmatched = [r for r in unmatched_records if not r["on_disk"]]
 

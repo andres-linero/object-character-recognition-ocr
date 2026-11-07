@@ -1,5 +1,9 @@
 # Operations guide
 
+## Synthetic preview
+
+Run `python3 scripts/prepare_demo.py`, then `sh scripts/run_demo.sh`. Open http://127.0.0.1:8502. This uses synthetic SQL data and no Azure calls or sign-in. See [the pipeline guide](data-pipeline.md) for the separate live workflow.
+
 ## First local run
 
 Follow the root README to create an environment, install dependencies, copy `.env.example`, and generate synthetic data. Configure your own Azure OCR resource and Entra web app, then launch Streamlit from the repository root. Confirm successful sign-in before using real documents.
@@ -26,7 +30,7 @@ Stop the app before changing local state. Back up source files and the complete 
 
 For a suspected corrupt workbook cache, move the cache file aside while stopped, then restart and allow it to rebuild. Preserve the original for diagnosis if permitted. Do not erase the scan index casually: it contains associations to source PDFs that may have been removed.
 
-There is no dedicated retry CLI, transactional rollback, or backup scheduler. A full reindex requires deliberate invocation of the existing indexing API with `force=True` or a future supported operation; it should be tested on synthetic data first. Removed source PDFs cannot be re-OCRed unless restored.
+The legacy scan index has no dedicated retry CLI or transactional rollback. The new database-backed pipeline provides page-level error retries and transactional tracker ingestion; see the pipeline guide. No backup scheduler is included. A full reindex requires deliberate invocation of the existing indexing API with `force=True` or a future supported operation; it should be tested on synthetic data first. Removed source PDFs cannot be re-OCRed unless restored.
 
 Before shared deployment, define approved retention for incoming PDFs, previews, extracted PDFs, caches, final outputs, and backups. Source deletion alone does not remove derived copies.
 
