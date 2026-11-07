@@ -62,16 +62,21 @@ The product UI is a localhost synthetic-data workspace. The legacy interface ret
 
 ## Dependencies and checks
 
-Primary runtime dependencies are in `requirements.txt` and `requirements-web.txt`; the SQL layer uses `requirements-data.txt`. The optional legacy Streamlit stack remains in `ADK_Agentic/requirements.txt`. Development dependencies are in `requirements-dev.txt`. Frontend DOM tests use the locked npm development dependencies in `web/`; the UI itself has no browser runtime framework or build step.
+`pyproject.toml` and `uv.lock` define the reproducible Python environment (Python 3.12–3.13). The requirement files remain compatible convenience entrypoints; CI uses the lock. Frontend development dependencies are locked in `web/package-lock.json`.
 
 ```sh
-python3 -m pytest -q
+uv sync --locked --all-groups
+uv run --locked ruff check ADK_Agentic scripts tests
+uv run --locked pytest -q
+uv run --locked pre-commit install
 cd web
 npm ci
 npm test
 ```
 
-Tests mock Azure OCR; they do not prove live sign-in or Azure connectivity. See `PRP.md` for audit findings and remaining publication checks.
+Pull requests run Ubuntu tests with PostgreSQL 17, Windows tests including the real shared-read API, frontend DOM tests, lint, and a redacted Gitleaks history scan. Dependabot proposes Python, npm, and Actions updates. Deployments remain manual: there is no configured production target or automatic CD. Merge through reviewed feature branches.
+
+Tests mock Azure OCR; they do not prove live sign-in or Azure connectivity. See the [current audit and remaining work](docs/audit-hardening.md). `PRP.md` preserves the initial public-copy audit.
 
 ## Architecture and documentation
 

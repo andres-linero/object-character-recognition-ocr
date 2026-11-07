@@ -8,6 +8,8 @@ import os
 import re
 import logging
 from io import BytesIO
+from dataclasses import dataclass
+from typing import Literal
 from typing import Optional
 
 from PIL import Image
@@ -58,11 +60,24 @@ def _crop_header(image_bytes: bytes, height_ratio: float = HEADER_CROP_HEIGHT, w
     return buf.getvalue()
 
 
-def extract_order_number(
+@dataclass(frozen=True)
+class ParsedIdentifier:
+    kind: Literal["shipment", "work_order"]
+    value: str
+
+
+def extract_order_number(image_bytes: bytes, crop_header: bool = True,
+                         crop_ratio: float = HEADER_CROP_HEIGHT) -> Optional[str]:
+    """Compatibility wrapper for the legacy scan index."""
+    result = extract_order_identity(image_bytes, crop_header, crop_ratio)
+    return result.value if result else None
+
+
+def extract_order_identity(
     image_bytes: bytes,
     crop_header: bool = True,
     crop_ratio: float = HEADER_CROP_HEIGHT,
-) -> Optional[str]:
+) -> Optional[ParsedIdentifier]:
     """
     Send image to Azure Document Intelligence (prebuilt-read) and extract
     the work order ID or SO number via regex.
@@ -93,6 +108,11 @@ def extract_order_number(
         for line in (page.lines or [])
     )
 
+    return parse_identifier(raw_text)
+
+
+def parse_identifier(raw_text: str) -> Optional[ParsedIdentifier]:
+    """Parse provider text without cloud calls, retaining its identifier namespace."""
     # Aggressive normalization: collapse ALL whitespace (newlines, tabs,
     # double spaces) into single spaces. Azure often splits "Shipment" and
     # "No." across lines and the naive space-join leaves inconsistent gaps.
@@ -137,16 +157,16 @@ def extract_order_number(
     #    \d{3,8} let 3-digit page fragments like "837" win over the
     #    actual 5-digit shipment number on the same page.
     label_match = re.search(
-        rf"(?:{LABEL_ALTS})\s*[.:#]?\s*0*(\d{{4,8}})",
+        rf"\b(?:{LABEL_ALTS})\s*[.:#]?\s*0*(\d{{4,8}})(?!\d)",
         all_text, re.IGNORECASE
     )
     if label_match:
-        return label_match.group(1)
+        return ParsedIdentifier("shipment", label_match.group(1))
 
     # 2. Work Order ID pattern: W-XXXXXX
-    match = re.search(r'W-\d+', all_text)
+    match = re.search(r'\bW-\d+\b', all_text, re.IGNORECASE)
     if match:
-        return match.group(0)
+        return ParsedIdentifier("work_order", match.group(0).upper())
 
     # 3. Order No. as fallback (separate from shipment to avoid false matches)
     order_match = re.search(
@@ -154,7 +174,7 @@ def extract_order_number(
         all_text, re.IGNORECASE
     )
     if order_match:
-        return order_match.group(1)
+        return ParsedIdentifier("work_order", order_match.group(1))
 
     # 4. Shipment Confirmation with number before or after title
     #    OCR sometimes reads the number out of order (e.g. "Confirmation 003452 Shipment No")
@@ -163,7 +183,7 @@ def extract_order_number(
         all_text, re.IGNORECASE
     )
     if confirm_match:
-        return confirm_match.group(1)
+        return ParsedIdentifier("shipment", confirm_match.group(1))
 
     # 5. Last-resort fallback for shipment documents where Azure couldn't
     #    pair the label with the number. Only triggers if the doc clearly
@@ -174,7 +194,8 @@ def extract_order_number(
     #    Lookbehind/ahead also exclude LETTERS so customer codes like
     #    "C000837" don't have their digit tail captured as a shipment.
     #    Leading zeros are preserved then stripped like the labeled path.
-    if "shipment" in text_lower or "sale no" in text_lower:
+    allow_unlabeled = os.getenv("OCR_ALLOW_UNLABELED_FALLBACK", "").lower() in {"1", "true", "yes"}
+    if allow_unlabeled and ("shipment" in text_lower or "sale no" in text_lower):
         for match in re.finditer(r'(?<![A-Za-z0-9])0*(\d{4,7})(?![A-Za-z0-9])', all_text):
             candidate = match.group(1)
             # Exclude form-specific postal codes or telephone fragments.
@@ -185,7 +206,7 @@ def extract_order_number(
             # leak through this fallback otherwise.
             if len(candidate) == 4 and 2020 <= int(candidate) <= 2099:
                 continue
-            return candidate
+            return ParsedIdentifier("shipment", candidate)
 
     # Do not retain OCR content in application logs. Header crops can contain
     # order metadata even though full tickets are never sent to OCR.

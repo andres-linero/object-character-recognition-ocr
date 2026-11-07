@@ -2,7 +2,7 @@
 from pathlib import Path
 
 import fitz
-from sqlalchemy import or_, select
+from sqlalchemy import select
 
 try:
     from . import storage as db
@@ -29,9 +29,9 @@ def register_pdf(store, path, synthetic=False):
 
 def process_page(store, page_id, source_system="tracker", extractor=None):
     """Commit an attempt before calling the provider; retain failures for explicit retry."""
+    from .ocr import ParsedIdentifier, extract_order_identity
     if extractor is None:
-        from .ocr import extract_order_number
-        extractor = extract_order_number
+        extractor = extract_order_identity
     with store.engine.connect() as connection:
         page = connection.execute(select(db.pages.c.page_number, db.documents.c.path, db.documents.c.sha256)
             .select_from(db.pages.join(db.documents)).where(db.pages.c.id == page_id)).mappings().one()
@@ -49,11 +49,18 @@ def process_page(store, page_id, source_system="tracker", extractor=None):
             rect = source.rect
             crop = fitz.Rect(rect.width / 2, 0, rect.width, rect.height / 4)
             image = source.get_pixmap(dpi=200, clip=crop).tobytes("png")
-        identifier = extractor(image, crop_header=False)
+        parsed = extractor(image, crop_header=False)
+        if isinstance(parsed, ParsedIdentifier):
+            identifier, kind = parsed.value, parsed.kind
+        else:
+            # Compatibility callbacks return W- work orders or numeric shipments.
+            identifier = str(parsed).strip() if parsed is not None else None
+            kind = "work_order" if identifier and identifier.upper().startswith("W-") else "shipment"
+        column = db.orders.c.order_number if kind == "work_order" else db.orders.c.shipment_number
         with store.engine.begin() as connection:
             matches = [] if not identifier else connection.execute(select(db.orders.c.id).where(
                 db.orders.c.source_system == source_system,
-                or_(db.orders.c.shipment_number == identifier, db.orders.c.order_number == identifier))).scalars().all()
+                column == identifier)).scalars().all()
             if len(matches) == 1:
                 upsert(connection, db.associations, ["order_id", "page_id", "method"],
                     {"order_id": matches[0], "page_id": page_id, "method": "azure_ocr"})

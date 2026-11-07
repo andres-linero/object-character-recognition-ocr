@@ -13,6 +13,12 @@ from typing import List, Dict, Optional
 
 CACHE_DIR = Path(__file__).parent / "cache"
 EXCEL_CACHE_FILE = CACHE_DIR / "excel_cache.pkl"
+EXCEL_CACHE_SCHEMA_VERSION = 1
+
+
+def _configured_excel_path() -> str:
+    """Normalize the same path for initial load and every reload check."""
+    return (os.getenv("EXCEL_PATH") or "").strip().strip('"').strip("'").strip()
 
 
 def _read_file_bytes_windows_shared(path: str) -> bytes:
@@ -88,7 +94,9 @@ def _load_cached_excel(signature: dict) -> Optional[pd.DataFrame]:
         return None
     try:
         cached = pd.read_pickle(EXCEL_CACHE_FILE)
-        if cached.get("signature") == signature:
+        if (cached.get("schema_version") == EXCEL_CACHE_SCHEMA_VERSION
+                and cached.get("signature") == signature
+                and isinstance(cached.get("data"), pd.DataFrame)):
             return cached.get("data")
     except Exception:
         return None
@@ -98,7 +106,7 @@ def _load_cached_excel(signature: dict) -> Optional[pd.DataFrame]:
 def _save_cached_excel(signature: dict, df: pd.DataFrame) -> None:
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        pd.to_pickle({"signature": signature, "data": df}, EXCEL_CACHE_FILE)
+        pd.to_pickle({"schema_version": EXCEL_CACHE_SCHEMA_VERSION, "signature": signature, "data": df}, EXCEL_CACHE_FILE)
     except Exception:
         pass
 
@@ -148,14 +156,14 @@ class DataLoader:
         self.excel_df = pd.DataFrame()
         self.excel_path: Optional[str] = None
         self.excel_mtime: float = 0.0
+        self.excel_signature: Optional[dict] = None
         self._load_excel()
 
     def _load_excel(self):
         """Load the Excel file from EXCEL_PATH into memory."""
         # Strip whitespace AND stray quotes that users sometimes leave
         # behind in .env (e.g. IMAGE_PATH=...Scans/Foo" with a trailing ").
-        raw = os.getenv("EXCEL_PATH") or ""
-        excel_path = raw.strip().strip('"').strip("'").strip()
+        excel_path = _configured_excel_path()
 
         if not excel_path:
             print("[X] EXCEL_PATH environment variable is not set")
@@ -222,6 +230,7 @@ class DataLoader:
             self.excel_df = df.copy()
             self.excel_path = excel_path
             self.excel_mtime = os.path.getmtime(excel_path)
+            self.excel_signature = signature
             source = "Excel cache" if loaded_from_cache else "Excel"
             print(f"[OK] Loaded {len(self.excel_df)} work orders from {source}")
         except Exception as e:
@@ -239,15 +248,15 @@ class DataLoader:
         file hasn't changed, full reload only when the file was modified.
         Returns True if a reload actually happened.
         """
-        excel_path = (os.getenv("EXCEL_PATH") or "").strip()
+        excel_path = _configured_excel_path()
         if not excel_path or not os.path.exists(excel_path):
             return False
         try:
-            current_mtime = os.path.getmtime(excel_path)
+            current_signature = _excel_signature(excel_path)
         except OSError:
             return False
-        if current_mtime > self.excel_mtime or self.excel_df.empty:
-            print(f"Excel file changed on disk — reloading")
+        if current_signature != self.excel_signature or self.excel_df.empty:
+            print("Excel file changed on disk — reloading")
             self._load_excel()
             return True
         return False

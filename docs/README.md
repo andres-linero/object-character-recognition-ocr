@@ -14,6 +14,7 @@ Start with the [project README](../README.md) to install and launch the app.
 | [ADR 0001](decisions/0001-modular-monolith.md) | Proposed architecture direction and implementation stages |
 | [ADR 0002](decisions/0002-relational-store-and-etl.md) | Proposed database, ETL, and resume evidence |
 | [Walkthrough plan](walkthroughs.md) | Video coverage, transcripts, and publication requirements |
+| [Current audit](audit-hardening.md) | Findings, regression fixes, CI checks, and remaining work |
 | [Release audit](../PRP.md) | Initial public-copy changes and validation limits |
 
 [Google Doc architecture workspace](https://docs.google.com/document/d/19lhy8-3sdm3E9ZSVoxvQ6Cty-0Tm62eW5EJPxWn24YQ/edit?usp=drivesdk) — design discussion and proposed decisions; access follows Drive permissions.

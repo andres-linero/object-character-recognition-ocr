@@ -1,6 +1,5 @@
 """Validate staging and honest page-level comparisons without any provider calls."""
 import json
-from pathlib import Path
 
 import fitz
 import pytest
