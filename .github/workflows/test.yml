@@ -1,0 +1,42 @@
+name: Test SQL pipeline and application
+on: [pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ocr_test
+          POSTGRES_PASSWORD: local_ci_only
+          POSTGRES_DB: ocr_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ocr_test -d ocr_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://ocr_test:local_ci_only@127.0.0.1:5432/ocr_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            requirements-data.txt
+            requirements-web.txt
+            ADK_Agentic/requirements.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - run: npm test
+        working-directory: web

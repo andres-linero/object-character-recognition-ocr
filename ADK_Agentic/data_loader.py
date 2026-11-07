@@ -294,6 +294,28 @@ class DataLoader:
         return None
 
 
+class DatabaseDataLoader(DataLoader):
+    """Expose normalized SQL orders through the existing dashboard contract."""
+    def __init__(self, url: str):
+        try:
+            from .storage import Store
+        except ImportError:
+            from storage import Store
+        self.store = Store(url)
+        self.excel_path = None
+        self.excel_mtime = 0.0
+        self._load_excel()
+
+    def _load_excel(self):
+        # Migrations/ETL are explicit CLI operations, never performed by UI reads.
+        self.excel_df = pd.DataFrame(self.store.order_rows())
+
+    def maybe_reload(self) -> bool:
+        self._load_excel()
+        return True
+
+
 def get_data_loader() -> DataLoader:
-    """Get data loader instance"""
-    return DataLoader()
+    """Use configured SQL storage, or retain Excel compatibility when unset."""
+    url = os.getenv("DATABASE_URL", "").strip()
+    return DatabaseDataLoader(url) if url else DataLoader()

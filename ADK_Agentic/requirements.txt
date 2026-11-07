@@ -1,4 +1,4 @@
-# Object Character Recognition (OCR) — install: pip install -r requirements.txt
+# Optical Character Recognition (OCR) — install: pip install -r requirements.txt
 
 # App
 streamlit>=1.37.0

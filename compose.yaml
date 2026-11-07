@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ocr
+      POSTGRES_USER: ocr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your local .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ocr_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocr -d ocr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  ocr_postgres:
