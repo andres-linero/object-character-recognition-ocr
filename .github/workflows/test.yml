@@ -28,7 +28,7 @@ jobs:
       - run: uv sync --locked --all-groups
       - run: uv run --locked ruff check ADK_Agentic scripts tests
       - run: uv run --locked pytest -q
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
