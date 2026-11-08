@@ -124,3 +124,28 @@ def test_wrong_order_associations_do_not_inflate_verified_page_counts(api_worksp
     summary = client.get('/api/workspaces/validation').json()
     assert summary['verified_pages'] == 6
     assert summary['verified_tickets'] == 1
+
+
+def test_scan_results_include_pending_pages_and_only_actual_ocr_matches(api_workspace):
+    client, store, dataset = api_workspace
+    response = client.get('/api/workspaces/validation/activity').json()
+    assert response['total'] == 12
+    assert response['counts']['success'] == response['counts']['pending'] == 6
+    read = [p for p in response['activity'] if p['status'] == 'success']
+    pending = [p for p in response['activity'] if p['status'] == 'pending']
+    assert all(p['matched_order']['work_order'] == 'W-990001' for p in read)
+    assert all(p['matched_order'] is None and p['identifier'] is None for p in pending)
+    assert all('path' not in p and p['page_id'] for p in response['activity'])
+    assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 0
+    page_id = pending[0]['page_id']
+    with store.engine.begin() as connection:
+        connection.execute(db.attempts.insert().values(page_id=page_id, started_at=db.utcnow(),
+            finished_at=db.utcnow(), provider='azure_document_intelligence', status='no_match', identifier='999999'))
+    assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 1
+    response = client.get('/api/workspaces/validation/activity').json()
+    flagged = next(p for p in response['activity'] if p['page_id'] == page_id)
+    assert flagged['status'] == 'no_match' and flagged['matched_order'] is None
+    with store.engine.begin() as connection:
+        connection.execute(db.attempts.insert().values(page_id=page_id, started_at=db.utcnow(),
+            finished_at=db.utcnow(), provider='azure_document_intelligence', status='success', identifier='900002'))
+    assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 0

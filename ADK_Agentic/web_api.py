@@ -25,7 +25,8 @@ class ReviewChange(BaseModel):
 def create_app(root=ROOT, databases=None, allowed_roots=None):
     root = Path(root)
     databases = databases or {"validation": root / "demo_runtime/ocr_validation.sqlite",
-                             "full": root / "demo_runtime/demo.sqlite"}
+                             "full": root / "demo_runtime/demo.sqlite",
+                             "intake": root / "demo_runtime/intake_test.sqlite"}
     allowed_roots = allowed_roots or [root / "demo_data", root / "demo_batches"]
     app = FastAPI(title="OCR Workspace API", version="1.0.0", docs_url="/api/docs", redoc_url=None)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
@@ -53,7 +54,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
 
     def enrichments():
         result = {}
-        for relative in ("demo_data/manifest.json", "demo_batches/batch_02/manifest.json", "demo_batches/batch_03/manifest.json"):
+        for relative in ("demo_data/manifest.json", "demo_batches/batch_02/manifest.json", "demo_batches/batch_03/manifest.json", "demo_batches/intake_test_03/manifest.json"):
             path = root / relative
             if path.exists():
                 data = json.loads(path.read_text())
@@ -68,6 +69,9 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
         review_state = {}
         for event in store.rows(select(db.reviews).order_by(db.reviews.c.created_at)):
             review_state[event["order_id"]] = event["status"] == "reviewed"
+        latest_attempts = {}
+        for attempt in store.rows(select(db.attempts).order_by(db.attempts.c.started_at, db.attempts.c.id)):
+            latest_attempts[attempt["page_id"]] = attempt
         memberships = {}
         for association in store.rows(select(db.associations)):
             entry = memberships.setdefault(association["order_id"], {"synthetic_manifest": set(), "azure_ocr": set()})
@@ -87,6 +91,8 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 assigned_to=row["Requested by"], order_type=row["Order_Type"],
                 expected_pages=total, verified_pages=verified,
                 ocr_status="verified" if total and verified >= total else "pending" if not verified else "partial",
+                flagged=any(latest_attempts.get(page_id, {}).get("status") in {"error", "no_match"}
+                            for page_id in expected_ids | actual_ids),
                 reviewed=review_state.get(row["database_id"], False)))
         return sorted(tickets, key=lambda r: r["shipment"], reverse=True)
 
@@ -118,7 +124,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
 
     @app.get("/api/datasets")
     def datasets():
-        return {"datasets": [dict(id=key, label="Azure-verified batches" if key == "validation" else "Full demo dataset")
+        return {"datasets": [dict(id=key, label={"validation": "Azure-verified batches", "full": "Full demo dataset", "intake": "New scan test — 3 PDFs"}.get(key, key))
                              for key, path in databases.items() if Path(path).is_file()],
                 "default": "validation" if Path(databases.get("validation", "")).is_file() else "full"}
 
@@ -130,6 +136,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
             recent = store.rows(select(db.attempts.c.finished_at).where(db.attempts.c.status == "success")
                                 .order_by(db.attempts.c.finished_at.desc()).limit(1))
             return dict(tickets=len(tickets), pages=counts["document_pages"], documents=counts["documents"],
+                flagged_tickets=sum(t["flagged"] for t in tickets),
                 verified_tickets=sum(t["ocr_status"] == "verified" for t in tickets),
                 verified_pages=sum(t["verified_pages"] for t in tickets),
                 review_queue=sum(not t["reviewed"] for t in tickets),
@@ -228,12 +235,33 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
     @app.get("/api/workspaces/{dataset}/activity")
     def activity(dataset):
         with workspace(dataset) as store:
-            rows = store.rows(select(db.attempts, db.pages.c.page_number, db.documents.c.path)
-                .select_from(db.attempts.join(db.pages).join(db.documents))
-                .order_by(db.attempts.c.started_at.desc()).limit(200))
-            return {"activity": [dict(id=r["id"], identifier=r["identifier"], status=r["status"],
-                page=r["page_number"], document=Path(r["path"]).name, at=r["finished_at"] or r["started_at"],
-                error_code=r["error_code"]) for r in rows]}
+            latest = {}
+            for attempt in store.rows(select(db.attempts).order_by(db.attempts.c.started_at, db.attempts.c.id)):
+                latest[attempt["page_id"]] = attempt
+            orders = {row["id"]: row for row in all_tickets(store)}
+            matched = {}
+            for link in store.rows(select(db.associations).where(db.associations.c.method == "azure_ocr")):
+                matched.setdefault(link["page_id"], []).append(link["order_id"])
+            rows = []
+            for page in store.rows(select(db.pages, db.documents.c.path).select_from(db.pages.join(db.documents))):
+                attempt = latest.get(page["id"], {})
+                links = matched.get(page["id"], [])
+                order = orders.get(links[0]) if len(links) == 1 and attempt.get("status") == "success" else None
+                try:
+                    modified = safe_file(page).stat().st_mtime
+                except HTTPException:
+                    modified = 0
+                rows.append(dict(id=attempt.get("id", page["id"]), page_id=page["id"],
+                    identifier=attempt.get("identifier"), status=attempt.get("status", "pending"),
+                    page=page["page_number"], document=Path(page["path"]).name,
+                    at=attempt.get("finished_at") or attempt.get("started_at"),
+                    error_code=attempt.get("error_code"), matched_order=order, modified=modified))
+            rows.sort(key=lambda r: (r["modified"], r["document"], -r["page"]), reverse=True)
+            counts = {status: sum(r["status"] == status for r in rows)
+                      for status in ("pending", "running", "success", "no_match", "error")}
+            for row in rows:
+                row.pop("modified")
+            return {"activity": rows[:200], "total": len(rows), "counts": counts}
 
     @app.get("/api/workspaces/{dataset}/imports")
     def imports(dataset):

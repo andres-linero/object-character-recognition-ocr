@@ -92,6 +92,8 @@ async function boot() {
         activity: [
           {
             id: "attempt-1",
+            page_id: "page-1",
+            matched_order: tickets[0],
             identifier: "900120",
             status: "success",
             page: 55,
@@ -207,7 +209,23 @@ test("left navigation switches between working document, OCR, and ingestion view
   assert.equal(document.querySelectorAll(".document-card").length, 1);
   findButton(document, "OCR activity").click();
   await wait(25);
-  assert.match(document.querySelector("tbody").textContent, /900120/);
+  assert.match(
+    document.querySelector(".scan-result-card").textContent,
+    /900120/,
+  );
+  assert.match(
+    document.querySelector(".scan-result-card").textContent,
+    /W-990120/,
+  );
+  assert.equal(
+    document.querySelector(".scan-page-preview img").getAttribute("src"),
+    "/api/workspaces/validation/pages/page-1/preview",
+  );
+  assert.ok(document.querySelector('a[href$="/tickets/ticket-0/download"]'));
+  const filter = document.querySelector('[aria-label="Filter OCR results"]');
+  filter.value = "flagged";
+  filter.dispatchEvent(new dom.window.Event("change"));
+  assert.equal(document.querySelectorAll(".scan-result-card").length, 0);
   findButton(document, "Ingestion history").click();
   await wait(25);
   assert.match(document.querySelector("tbody").textContent, /Tracker import/);

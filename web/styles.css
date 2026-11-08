@@ -2451,3 +2451,62 @@ kbd {
 .detail-section-title {
   color: #506b5b;
 }
+
+/* Page evidence beside its matched tracker record. */
+.scan-results-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 20px 0;
+}
+.scan-results-toolbar select {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: white;
+}
+.scan-results-grid {
+  display: grid;
+  gap: 18px;
+}
+.scan-result-card {
+  display: grid;
+  grid-template-columns: minmax(160px, 230px) minmax(0, 1fr);
+  overflow: hidden;
+}
+.scan-page-preview {
+  background: #edf1f4;
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.scan-page-preview img {
+  width: 100%;
+  height: 280px;
+  object-fit: contain;
+}
+.scan-result-body {
+  padding: 22px;
+  min-width: 0;
+}
+.scan-result-body h2 {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.scan-result-note {
+  margin: 14px 0;
+}
+@media (max-width: 700px) {
+  .scan-result-card {
+    grid-template-columns: 1fr;
+  }
+  .scan-page-preview img {
+    height: 240px;
+  }
+  .scan-results-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

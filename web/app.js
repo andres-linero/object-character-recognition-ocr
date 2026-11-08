@@ -225,11 +225,11 @@ function summaryCards() {
     { class: "summary-grid" },
     ...[
       [
-        "Registered Records",
-        s.tickets,
+        "Flagged Orders",
+        s.flagged_tickets ?? 0,
         "orders",
         "neutral",
-        "Across this workspace",
+        "OCR issues requiring attention",
       ],
       [
         "OCR Verification",
@@ -268,7 +268,13 @@ function summaryCards() {
               () => navigate("tickets", "verified"),
               "text-button",
             )
-          : null,
+          : label === "Flagged Orders"
+            ? button(
+                "View flagged scans",
+                () => navigate("ocr", "flagged"),
+                "text-button",
+              )
+            : null,
       ),
     ),
   );
@@ -965,92 +971,178 @@ function documents(rows) {
 }
 function activity(rows) {
   main.replaceChildren(
-    heading("OCR activity", "A page-by-page record of what Azure found.", [
-      datasetControl(),
-      button("Refresh", loadView, "button secondary", "refresh"),
-    ]),
-  );
-  const panel = el(
-    "section",
-    { class: "panel activity-panel" },
+    heading(
+      "OCR activity",
+      "Scanned PDF pages → OCR identifier → matched work order → ticket PDF.",
+      [
+        datasetControl(),
+        button("Refresh results", loadView, "button secondary", "refresh"),
+      ],
+    ),
     el(
-      "div",
-      { class: "section-heading" },
-      el("h2", {}, "Processing history"),
-      badge(`${rows.length} recent attempts`),
+      "p",
+      { class: "tracker-footnote" },
+      "Newest source files first. Company and jobsite come from the matched tracker record. Rental agreement numbers are not recorded in this dataset; Shipment/SO is shown separately.",
     ),
   );
-  if (!rows.length)
-    panel.append(
+  if (!rows.length) {
+    main.append(
       empty(
-        "No OCR activity yet",
-        "Manifest expectations are available, but no pages have been sent to Azure.",
+        "No scans registered",
+        "Register scanned PDFs to see their pages and OCR results here.",
       ),
     );
-  else
-    panel.append(
-      el(
+    return;
+  }
+  const resultLabels = {
+    pending: "Not processed",
+    running: "Reading with Azure",
+    success: "Matched",
+    no_match: "Needs attention",
+    error: "Processing failed",
+  };
+  const grid = el("div", { class: "scan-results-grid" });
+  const render = (filter) => {
+    grid.replaceChildren();
+    const visible = rows.filter(
+      (row) =>
+        filter === "all" ||
+        (filter === "flagged"
+          ? ["error", "no_match"].includes(row.status)
+          : row.status === filter),
+    );
+    if (!visible.length)
+      grid.append(
+        empty("No pages in this category", "Choose another result filter."),
+      );
+    for (const row of visible) {
+      const order = row.matched_order;
+      const issue =
+        row.status === "no_match"
+          ? row.identifier
+            ? "Identifier read, but no unique tracker order matched."
+            : "No readable ticket identifier found."
+          : row.status === "error"
+            ? `OCR failed (${row.error_code || "provider error"}).`
+            : row.status === "pending"
+              ? "Registered scan; OCR has not run yet."
+              : row.status === "running"
+                ? "OCR request is in progress. Refresh to see the result."
+                : "OCR identifier matched the tracker.";
+      const content = el(
         "div",
-        { class: "table-scroll" },
+        { class: "scan-result-body" },
         el(
-          "table",
-          { class: "orders-table activity-table" },
-          el(
-            "thead",
-            {},
-            el(
-              "tr",
-              {},
-              ...[
-                "Extracted shipment",
-                "Source document",
-                "Page",
-                "Result",
-                "Processed",
-              ].map((h) => el("th", { scope: "col" }, h)),
-            ),
-          ),
-          el(
-            "tbody",
-            {},
-            rows.map((row) =>
-              el(
-                "tr",
-                {},
-                el(
-                  "td",
-                  {},
-                  el(
-                    "strong",
-                    { class: "mono" },
-                    row.identifier || "No identifier",
-                  ),
-                ),
-                el("td", {}, row.document),
-                el("td", {}, row.page),
-                el(
-                  "td",
-                  {},
-                  badge(
-                    row.status === "success"
-                      ? "Matched"
-                      : row.status.replaceAll("_", " "),
-                    row.status === "success"
-                      ? "green"
-                      : row.status === "error"
-                        ? "red"
-                        : "neutral",
-                    row.status === "success" ? "check" : null,
-                  ),
-                ),
-                el("td", { class: "muted" }, time(row.at)),
-              ),
-            ),
+          "div",
+          { class: "section-heading" },
+          el("h2", {}, row.document),
+          badge(
+            resultLabels[row.status] || row.status,
+            row.status === "success"
+              ? "green"
+              : ["error", "no_match"].includes(row.status)
+                ? "amber"
+                : "neutral",
           ),
         ),
-      ),
-    );
-  main.append(panel);
+        el(
+          "p",
+          { class: "muted" },
+          `Source page ${row.page} · ${row.at ? time(row.at) : "No OCR attempt"}`,
+        ),
+        el(
+          "dl",
+          { class: "detail-grid" },
+          field(
+            "OCR read",
+            row.identifier || "No identifier returned",
+            "mono-value",
+          ),
+          field("Work order", order?.work_order || "Not matched", "mono-value"),
+          field("Company (tracker)", order?.customer || "Not matched"),
+          field(
+            "Shipment / SO",
+            order?.shipment || "Not matched",
+            "mono-value",
+          ),
+          field("Rental agreement number", "Not recorded"),
+          field("Jobsite (tracker)", order?.delivery_location || "Not matched"),
+        ),
+        el("p", { class: "scan-result-note" }, issue),
+      );
+      if (order)
+        content.append(
+          el(
+            "div",
+            { class: "heading-actions" },
+            button(
+              "Open matched ticket",
+              () => openDetail(order.id),
+              "button secondary",
+              "orders",
+            ),
+            el(
+              "a",
+              {
+                class: "button primary",
+                href: `${base()}/tickets/${order.id}/download`,
+              },
+              icon("down"),
+              "Download ticket PDF",
+            ),
+          ),
+        );
+      grid.append(
+        el(
+          "article",
+          { class: "panel scan-result-card" },
+          row.page_id
+            ? el(
+                "a",
+                {
+                  href: `${base()}/pages/${row.page_id}/preview`,
+                  target: "_blank",
+                  rel: "noopener",
+                  class: "scan-page-preview",
+                  "aria-label": `Open ${row.document} page ${row.page}`,
+                },
+                el("img", {
+                  src: `${base()}/pages/${row.page_id}/preview`,
+                  alt: `Scan of ${row.document}, page ${row.page}`,
+                  loading: "lazy",
+                }),
+              )
+            : null,
+          content,
+        ),
+      );
+    }
+  };
+  const control = el(
+    "select",
+    {
+      "aria-label": "Filter OCR results",
+      onChange: (event) => render(event.target.value),
+    },
+    ...[
+      ["all", "All scan results"],
+      ["success", "Matched"],
+      ["pending", "Not processed"],
+      ["running", "Reading"],
+      ["flagged", "Flagged / needs attention"],
+    ].map(([value, label]) => el("option", { value }, label)),
+  );
+  if (state.filter === "flagged") control.value = "flagged";
+  main.append(
+    el(
+      "div",
+      { class: "scan-results-toolbar" },
+      el("h2", {}, `Scan results · ${rows.length} pages (up to 200 newest)`),
+      control,
+    ),
+    grid,
+  );
+  render(control.value);
 }
 function imports(rows) {
   main.replaceChildren(
