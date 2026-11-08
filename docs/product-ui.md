@@ -1,3 +1,5 @@
+> Current UI: one **Scan intake** view for the selected dataset. The dataset selector remains available to identify the tracked records. The earlier multi-screen layouts described below are retained as implementation history; they are not separate visible workflow stages.
+
 # Product UI: Order Tracker
 
 The primary local interface is now a custom responsive web app, served by FastAPI. The original Streamlit interfaces remain as legacy tools and are no longer the primary UI.
@@ -89,3 +91,11 @@ python scripts/prepare_intake_test.py --process
 Select **New scan test — 3 PDFs** and open **OCR activity**. Refresh results to see attempts committed by the separate OCR command. The UI does not start cloud processing or watch folders. This test uses an isolated `demo_runtime/intake_test.sqlite`; it does not alter earlier validation evidence. The 2026-11-08 local live run returned 18 successful matches across all three PDFs. This measures identifier matching on synthetic pages, not extraction accuracy for every field.
 
 The current forms have Work Order and Shipment/SO numbers, not a distinct rental agreement number. The UI labels a separate rental agreement number as not recorded. Company/jobsite are resolved from the tracker after matching; the header OCR does not extract them.
+
+## Single-view revision
+
+The visible sidebar has one Scan intake entry. PDF previews, latest OCR results, matched records and downloads share that view. The dataset selector remains in the header; existing selections are remembered. Flag cards and flag filter controls are removed. Per-page failure states remain visible beside the evidence.
+
+Summary metrics count PDF source documents, not orders: **PDF files received**, **OCR complete** (all registered pages have a latest successful attempt), and **Files remaining**. A multi-ticket PDF counts as one file. File totals cover the entire selected dataset even when the page list is limited to the 200 newest source pages.
+
+The three new test PDFs and their existing Azure attempts were also appended to the local full demo workspace without submitting OCR again. The original validation and intake test datasets remain selectable reference subsets; no additional dataset was created by this revision.

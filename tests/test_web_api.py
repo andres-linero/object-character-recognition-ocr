@@ -130,6 +130,8 @@ def test_scan_results_include_pending_pages_and_only_actual_ocr_matches(api_work
     client, store, dataset = api_workspace
     response = client.get('/api/workspaces/validation/activity').json()
     assert response['total'] == 12
+    assert response['files'] == 1
+    assert response['files_read'] == 0
     assert response['counts']['success'] == response['counts']['pending'] == 6
     read = [p for p in response['activity'] if p['status'] == 'success']
     pending = [p for p in response['activity'] if p['status'] == 'pending']

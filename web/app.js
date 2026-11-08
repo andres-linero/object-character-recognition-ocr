@@ -134,14 +134,7 @@ async function api(path, options) {
   return response.json();
 }
 const base = () => `/api/workspaces/${encodeURIComponent(state.dataset)}`;
-const navItems = [
-  ["overview", "Overview", "grid"],
-  ["tickets", "Order Tracker", "orders"],
-  ["documents", "Documents", "file"],
-  ["ocr", "OCR activity", "scan"],
-  ["review", "Review queue", "circlecheck"],
-  ["imports", "Ingestion history", "clock"],
-];
+const navItems = [["ocr", "Scan intake", "scan"]];
 function navigate(view, filter = "all") {
   state.view = view;
   state.page = 1;
@@ -219,62 +212,23 @@ function heading(title, subtitle, actions = []) {
   );
 }
 function summaryCards() {
-  const s = state.summary;
+  const s = state.scanCounts || {};
+  const total = s.files ?? 0,
+    read = s.files_read ?? 0;
   return el(
     "div",
     { class: "summary-grid" },
     ...[
-      [
-        "Flagged Orders",
-        s.flagged_tickets ?? 0,
-        "orders",
-        "neutral",
-        "OCR issues requiring attention",
-      ],
-      [
-        "OCR Verification",
-        `${s.verified_tickets} / ${s.tickets}`,
-        "circlecheck",
-        "green",
-        "Orders with all expected pages read",
-      ],
-      [
-        "Awaiting OCR",
-        s.tickets - s.verified_tickets,
-        "scan",
-        "amber",
-        "Orders still awaiting complete OCR",
-      ],
-    ].map(([label, value, glyph, tone, note]) =>
+      ["PDF files received", total, "Source files in this intake"],
+      ["OCR complete", `${read} / ${total}`, "All pages read and matched"],
+      ["Files remaining", total - read, "Not yet completely matched"],
+    ].map(([label, value, note]) =>
       el(
         "article",
         { class: "summary-card" },
-        el(
-          "div",
-          { class: "summary-label" },
-          label,
-          el("span", { class: `metric-icon ${tone}` }, icon(glyph)),
-        ),
-        el("div", { class: "summary-value" }, value ?? "—"),
-        el(
-          "div",
-          { class: `summary-note ${tone === "green" ? "positive" : ""}` },
-          tone === "green" ? icon("check") : null,
-          note,
-        ),
-        label === "OCR Verification"
-          ? button(
-              "View read orders",
-              () => navigate("tickets", "verified"),
-              "text-button",
-            )
-          : label === "Flagged Orders"
-            ? button(
-                "View flagged scans",
-                () => navigate("ocr", "flagged"),
-                "text-button",
-              )
-            : null,
+        el("div", { class: "summary-label" }, label),
+        el("div", { class: "summary-value" }, value),
+        el("div", { class: "summary-note" }, note),
       ),
     ),
   );
@@ -751,7 +705,10 @@ async function loadView() {
       if (generation === state.request) documents(data.documents);
     } else if (state.view === "ocr") {
       const data = await api(`${base()}/activity`);
-      if (generation === state.request) activity(data.activity);
+      if (generation === state.request) {
+        state.scanCounts = data;
+        activity(data.activity);
+      }
     } else if (state.view === "imports") {
       const data = await api(`${base()}/imports`);
       if (generation === state.request) imports(data.imports);
@@ -972,7 +929,7 @@ function documents(rows) {
 function activity(rows) {
   main.replaceChildren(
     heading(
-      "OCR activity",
+      "Scan intake",
       "Scanned PDF pages → OCR identifier → matched work order → ticket PDF.",
       [
         datasetControl(),
@@ -985,6 +942,7 @@ function activity(rows) {
       "Newest source files first. Company and jobsite come from the matched tracker record. Rental agreement numbers are not recorded in this dataset; Shipment/SO is shown separately.",
     ),
   );
+  main.append(summaryCards());
   if (!rows.length) {
     main.append(
       empty(
@@ -1005,11 +963,7 @@ function activity(rows) {
   const render = (filter) => {
     grid.replaceChildren();
     const visible = rows.filter(
-      (row) =>
-        filter === "all" ||
-        (filter === "flagged"
-          ? ["error", "no_match"].includes(row.status)
-          : row.status === filter),
+      (row) => filter === "all" || row.status === filter,
     );
     if (!visible.length)
       grid.append(
@@ -1129,10 +1083,8 @@ function activity(rows) {
       ["success", "Matched"],
       ["pending", "Not processed"],
       ["running", "Reading"],
-      ["flagged", "Flagged / needs attention"],
     ].map(([value, label]) => el("option", { value }, label)),
   );
-  if (state.filter === "flagged") control.value = "flagged";
   main.append(
     el(
       "div",
@@ -1656,8 +1608,7 @@ async function boot() {
     state.dataset = state.datasets.some((d) => d.id === saved)
       ? saved
       : result.default;
-    const route = location.hash.slice(2);
-    state.view = navItems.some((n) => n[0] === route) ? route : "tickets";
+    state.view = "ocr";
     await loadView();
   } catch (error) {
     main.replaceChildren(

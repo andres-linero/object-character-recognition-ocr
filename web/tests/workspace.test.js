@@ -89,6 +89,8 @@ async function boot() {
       };
     else if (url.pathname.endsWith("/activity"))
       data = {
+        files: 2,
+        files_read: 1,
         activity: [
           {
             id: "attempt-1",
@@ -136,49 +138,41 @@ const findButton = (document, text) =>
   [...document.querySelectorAll("button")].find(
     (b) => b.textContent.trim() === text,
   );
-test("Order Tracker renders real response rows safely with readable columns and pagination", async () => {
+test("single intake view counts files, keeps dataset context, and removes flag tabs", async () => {
   const { dom, document } = await boot();
-  assert.equal(document.querySelector("h1").textContent, "Order Tracker");
+  assert.equal(document.querySelector("h1").textContent, "Scan intake");
+  assert.equal(document.querySelectorAll("#navigation button").length, 1);
   assert.deepEqual(
-    [...document.querySelectorAll("th")].map((e) => e.textContent),
-    [
-      "Work order",
-      "Customer & location",
-      "Address",
-      "Order status",
-      "OCR result",
-      "Due date",
-      "",
-    ],
+    [...document.querySelectorAll(".summary-value")].map((n) => n.textContent),
+    ["2", "1 / 2", "1"],
   );
-  assert.equal(document.querySelectorAll("tbody tr").length, 10);
+  assert.ok(document.querySelector('[aria-label="Dataset"]'));
+  assert.equal(document.querySelector('option[value="flagged"]'), null);
+  assert.equal(document.querySelector(".scan-result-card script"), null);
   assert.match(
-    document.querySelector("tbody").textContent,
-    /<script>alert\(1\)<\/script>/,
-  );
-  assert.equal(document.querySelector("tbody script"), null);
-  findButton(document, "2").click();
-  assert.match(document.querySelector("tbody").textContent, /W-990110/);
-  assert.match(
-    document.querySelector(".table-footer").textContent,
-    /Showing 11–20 of 20/,
+    document.querySelector(".scan-result-card").textContent,
+    /Demo <script>alert/,
   );
   dom.window.close();
 });
-test("search and status filters request fresh API data rather than a static dataframe", async () => {
+test("the intake filters scan results without switching workflow screens", async () => {
   const { dom, document, calls } = await boot();
-  const input = document.querySelector("input[type=search]");
-  input.value = "900119";
-  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  await wait(260);
-  assert.equal(document.querySelectorAll("tbody tr").length, 1);
-  assert.match(document.querySelector("tbody").textContent, /W-990119/);
-  assert(calls.some((call) => call.path.includes("q=900119")));
+  const filter = document.querySelector('[aria-label="Filter OCR results"]');
+  filter.value = "pending";
+  filter.dispatchEvent(new dom.window.Event("change"));
+  assert.equal(document.querySelectorAll(".scan-result-card").length, 0);
+  filter.value = "all";
+  filter.dispatchEvent(new dom.window.Event("change"));
+  assert.equal(document.querySelectorAll(".scan-result-card").length, 1);
+  findButton(document, "Refresh results").click();
+  await wait(25);
+  assert.ok(calls.filter((c) => c.path.endsWith("/activity")).length >= 2);
+  assert.equal(document.querySelector("h1").textContent, "Scan intake");
   dom.window.close();
 });
 test("ticket drawer exposes the selected order, page evidence, and a six-page download route", async () => {
   const { dom, document } = await boot();
-  document.querySelector("tbody tr").click();
+  findButton(document, "Open matched ticket").click();
   await wait(25);
   assert.equal(
     document.querySelector("[role=dialog] h2").textContent,
@@ -199,35 +193,5 @@ test("ticket drawer exposes the selected order, page evidence, and a six-page do
   assert.match(document.querySelector(".paper-image").alt, /page 6/);
   document.querySelector('[aria-label="Close work order"]').click();
   assert.equal(document.querySelector("[role=dialog]"), null);
-  dom.window.close();
-});
-test("left navigation switches between working document, OCR, and ingestion views", async () => {
-  const { dom, document } = await boot();
-  findButton(document, "Documents").click();
-  await wait(25);
-  assert.equal(document.querySelector("h1").textContent, "Documents");
-  assert.equal(document.querySelectorAll(".document-card").length, 1);
-  findButton(document, "OCR activity").click();
-  await wait(25);
-  assert.match(
-    document.querySelector(".scan-result-card").textContent,
-    /900120/,
-  );
-  assert.match(
-    document.querySelector(".scan-result-card").textContent,
-    /W-990120/,
-  );
-  assert.equal(
-    document.querySelector(".scan-page-preview img").getAttribute("src"),
-    "/api/workspaces/validation/pages/page-1/preview",
-  );
-  assert.ok(document.querySelector('a[href$="/tickets/ticket-0/download"]'));
-  const filter = document.querySelector('[aria-label="Filter OCR results"]');
-  filter.value = "flagged";
-  filter.dispatchEvent(new dom.window.Event("change"));
-  assert.equal(document.querySelectorAll(".scan-result-card").length, 0);
-  findButton(document, "Ingestion history").click();
-  await wait(25);
-  assert.match(document.querySelector("tbody").textContent, /Tracker import/);
   dom.window.close();
 });

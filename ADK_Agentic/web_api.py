@@ -253,15 +253,20 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                     modified = 0
                 rows.append(dict(id=attempt.get("id", page["id"]), page_id=page["id"],
                     identifier=attempt.get("identifier"), status=attempt.get("status", "pending"),
-                    page=page["page_number"], document=Path(page["path"]).name,
+                    page=page["page_number"], document_id=page["document_id"], document=Path(page["path"]).name,
                     at=attempt.get("finished_at") or attempt.get("started_at"),
                     error_code=attempt.get("error_code"), matched_order=order, modified=modified))
             rows.sort(key=lambda r: (r["modified"], r["document"], -r["page"]), reverse=True)
             counts = {status: sum(r["status"] == status for r in rows)
                       for status in ("pending", "running", "success", "no_match", "error")}
+            document_states = {}
+            for row in rows:
+                document_states.setdefault(row["document_id"], []).append(row["status"])
+            files_read = sum(all(status == "success" for status in statuses) for statuses in document_states.values())
             for row in rows:
                 row.pop("modified")
-            return {"activity": rows[:200], "total": len(rows), "counts": counts}
+            return {"activity": rows[:200], "total": len(rows), "counts": counts,
+                    "files": len(document_states), "files_read": files_read}
 
     @app.get("/api/workspaces/{dataset}/imports")
     def imports(dataset):
