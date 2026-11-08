@@ -9,4 +9,7 @@ elif [ -x "$ROOT/.venv/bin/python" ]; then
 else
     PYTHON_BIN=python3
 fi
+if [ ! -f "$ROOT/demo_runtime/workspace.sqlite" ]; then
+    "$PYTHON_BIN" "$ROOT/scripts/prepare_workspace.py"
+fi
 exec "$PYTHON_BIN" -m uvicorn ADK_Agentic.web_api:app --host 127.0.0.1 --port 8700

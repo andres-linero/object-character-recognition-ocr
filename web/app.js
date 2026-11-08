@@ -134,7 +134,14 @@ async function api(path, options) {
   return response.json();
 }
 const base = () => `/api/workspaces/${encodeURIComponent(state.dataset)}`;
-const navItems = [["ocr", "Scan intake", "scan"]];
+const navItems = [
+  ["overview", "Overview", "grid"],
+  ["tickets", "Dataset", "orders"],
+  ["documents", "Documents", "file"],
+  ["ocr", "OCR activity", "scan"],
+  ["review", "Review queue", "circlecheck"],
+  ["imports", "Ingestion history", "clock"],
+];
 function navigate(view, filter = "all") {
   state.view = view;
   state.page = 1;
@@ -171,30 +178,10 @@ function navigation() {
 }
 function datasetControl() {
   return el(
-    "label",
-    { class: "dataset-control" },
+    "span",
+    { class: "dataset-control", "aria-label": "Dataset" },
     icon("grid"),
-    el(
-      "select",
-      {
-        "aria-label": "Dataset",
-        onChange: (event) => {
-          state.dataset = event.target.value;
-          localStorage.setItem("ocr-dataset", state.dataset);
-          state.page = 1;
-          state.documentFilter = "";
-          closeDetail();
-          loadView();
-        },
-      },
-      state.datasets.map((d) =>
-        el(
-          "option",
-          { value: d.id, selected: d.id === state.dataset },
-          d.label,
-        ),
-      ),
-    ),
+    `${state.summary.tickets ?? 0} tracker records`,
   );
 }
 function heading(title, subtitle, actions = []) {
@@ -686,6 +673,7 @@ async function loadView() {
   main.setAttribute("aria-busy", "true");
   try {
     state.summary = await api(base());
+    state.scanCounts = await api(`${base()}/activity`);
     if (generation !== state.request) return;
     navigation();
     if (["tickets", "review"].includes(state.view)) {
@@ -930,7 +918,7 @@ function activity(rows) {
   main.replaceChildren(
     heading(
       "Scan intake",
-      "Scanned PDF pages → OCR identifier → matched work order → ticket PDF.",
+      "Drop a demo PDF in Scans/incoming. OCR starts automatically and matches its pages to the dataset.",
       [
         datasetControl(),
         button("Refresh results", loadView, "button secondary", "refresh"),
@@ -1608,8 +1596,17 @@ async function boot() {
     state.dataset = state.datasets.some((d) => d.id === saved)
       ? saved
       : result.default;
-    state.view = "ocr";
+    const route = location.hash.slice(2);
+    state.view = navItems.some((n) => n[0] === route) ? route : "ocr";
     await loadView();
+    window.setInterval(() => {
+      if (
+        ["ocr", "overview", "documents"].includes(state.view) &&
+        !state.detail &&
+        !document.hidden
+      )
+        loadView();
+    }, 5000);
   } catch (error) {
     main.replaceChildren(
       empty(

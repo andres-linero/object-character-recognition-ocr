@@ -1,9 +1,10 @@
 """Read-only synthetic workspace API with a local review action; no Azure calls."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from pathlib import Path
 import json
+import threading
 
 import fitz
 from fastapi import FastAPI, HTTPException, Request
@@ -24,11 +25,25 @@ class ReviewChange(BaseModel):
 
 def create_app(root=ROOT, databases=None, allowed_roots=None):
     root = Path(root)
-    databases = databases or {"validation": root / "demo_runtime/ocr_validation.sqlite",
-                             "full": root / "demo_runtime/demo.sqlite",
-                             "intake": root / "demo_runtime/intake_test.sqlite"}
-    allowed_roots = allowed_roots or [root / "demo_data", root / "demo_batches"]
-    app = FastAPI(title="OCR Workspace API", version="1.0.0", docs_url="/api/docs", redoc_url=None)
+    live = databases is None
+    databases = databases or {"workspace": root / "demo_runtime/workspace.sqlite"}
+    allowed_roots = allowed_roots or [root / "demo_data", root / "demo_batches", root / "Scans"]
+
+    @asynccontextmanager
+    async def lifespan(app):
+        stop = threading.Event()
+        worker = None
+        if live and Path(databases["workspace"]).is_file():
+            from .intake_watcher import watch
+            worker = threading.Thread(target=watch, args=(root, databases["workspace"], root / "Scans/incoming", stop), daemon=True)
+            worker.start()
+        app.state.intake_worker = worker
+        yield
+        stop.set()
+        if worker:
+            worker.join(timeout=1)
+
+    app = FastAPI(title="OCR Workspace API", version="1.0.0", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
 
     @contextmanager
@@ -120,13 +135,15 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "mode": "local_synthetic_workspace"}
+        return {"status": "ok", "mode": "local_synthetic_workspace",
+                "watching": bool(getattr(app.state, "intake_worker", None) and app.state.intake_worker.is_alive()),
+                "scan_directory": "Scans/incoming"}
 
     @app.get("/api/datasets")
     def datasets():
-        return {"datasets": [dict(id=key, label={"validation": "Azure-verified batches", "full": "Full demo dataset", "intake": "New scan test — 3 PDFs"}.get(key, key))
-                             for key, path in databases.items() if Path(path).is_file()],
-                "default": "validation" if Path(databases.get("validation", "")).is_file() else "full"}
+        available = [dict(id=key, label="Dataset") for key, path in databases.items() if Path(path).is_file()]
+        return {"datasets": available, "default": available[0]["id"] if available else None}
+
 
     @app.get("/api/workspaces/{dataset}")
     def overview(dataset):

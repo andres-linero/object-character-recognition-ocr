@@ -138,15 +138,21 @@ const findButton = (document, text) =>
   [...document.querySelectorAll("button")].find(
     (b) => b.textContent.trim() === text,
   );
-test("single intake view counts files, keeps dataset context, and removes flag tabs", async () => {
+test("restored tabs count files and show dataset context without test-stage choices", async () => {
   const { dom, document } = await boot();
   assert.equal(document.querySelector("h1").textContent, "Scan intake");
-  assert.equal(document.querySelectorAll("#navigation button").length, 1);
+  assert.equal(document.querySelectorAll("#navigation button").length, 6);
   assert.deepEqual(
     [...document.querySelectorAll(".summary-value")].map((n) => n.textContent),
     ["2", "1 / 2", "1"],
   );
   assert.ok(document.querySelector('[aria-label="Dataset"]'));
+  assert.equal(document.querySelector(".dataset-control select"), null);
+  findButton(document, "Dataset").click();
+  await wait(25);
+  assert.ok(document.querySelector("tbody"));
+  findButton(document, "OCR activity").click();
+  await wait(25);
   assert.equal(document.querySelector('option[value="flagged"]'), null);
   assert.equal(document.querySelector(".scan-result-card script"), null);
   assert.match(
