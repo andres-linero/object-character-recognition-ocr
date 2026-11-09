@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 import json
+import hashlib
 from pathlib import Path
 import random
 import shutil
@@ -315,7 +316,8 @@ def generate_dataset(output: Path, count: int = 100, seed: int = 42,
             record["items"] = list(record["items"])
             record["order_date"] = ticket.order_date.isoformat()
             record["deadline"] = ticket.deadline.isoformat()
-            record.update({"pdf": f"incoming_scans/{pdf_name}", "pages": pages})
+            record.update({"pdf": f"incoming_scans/{pdf_name}", "pages": pages,
+                           "pdf_sha256": hashlib.sha256((incoming / pdf_name).read_bytes()).hexdigest()})
             manifest_tickets.append(record)
         _write_tracker(staging / "orders.xlsx", tickets)
         manifest = {"generator": GENERATOR_ID, "seed": seed, "count": count,

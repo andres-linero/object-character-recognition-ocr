@@ -26,3 +26,13 @@ The parser reads the shipment/work-order identifier from the page header. Compan
 This is a localhost synthetic workspace; it does not replace production authentication. Unknown PDFs are deliberately skipped and never silently relabeled synthetic. The legacy signed-in Streamlit interface and office repository are unchanged. Full-page unknown-document extraction, authentication for private scans, durable distributed job leasing, and an explicit failed-page retry UI remain future work.
 
 Local tests cover stable-copy detection, outside samples remaining unprocessed, per-page matching, immutable snapshots, no duplicate provider calls on watcher restart, unknown-file rejection, API source boundaries, restored tabs, file counts, and ticket drawers. Azure is mocked in regression tests. The earlier three-PDF manual live test matched 18/18 pages; those results are retained in the archived fixture database, not preloaded into the live intake.
+
+## Live OCR Verification
+
+Overview and OCR activity contain a connected progress display driven by the worker's thread-safe status. Server-sent events deliver the latest state about once a second; the UI updates the progress panel without replacing the scan list or an open drawer. Reconnection keeps the last known status and labels the connection interruption. The five-second list refresh remains independent.
+
+The display connects **PDF detected → OCR reading → Matching orders → Ticket PDF ready**. Page counters reflect completed attempts and successful matches, not elapsed-time estimates. Reading and matching can both remain active because each page is matched as soon as its OCR response arrives. Reduced-motion preferences disable animations.
+
+Readiness requires successful current-page attempts, unambiguous actual associations, enough associated pages for the order's expected count, and successful PDF creation/reopening. The worker writes checked ticket artifacts under `Scans/output/`. Unreadable/unmatched pages or PDF write failures display attention/error states and never show a ready confirmation. Download actions appear on the live panel only after completion.
+
+`GET /api/workspaces/{dataset}/progress` returns the current snapshot; `/progress/stream` streams it. This status is per live worker process and resets on server restart; SQL attempts and PDF outputs persist. Existing incoming PDFs are reconciled on restart without new OCR calls for already attempted pages. Generator manifests retain PDF checksums so moving a sample before server startup still permits recognition. No input samples were placed into intake or submitted to Azure for this UI revision.

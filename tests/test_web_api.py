@@ -151,3 +151,13 @@ def test_scan_results_include_pending_pages_and_only_actual_ocr_matches(api_work
         connection.execute(db.attempts.insert().values(page_id=page_id, started_at=db.utcnow(),
             finished_at=db.utcnow(), provider='azure_document_intelligence', status='success', identifier='900002'))
     assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 0
+
+
+def test_progress_snapshot_reports_worker_state_and_respects_workspace_boundary(api_workspace):
+    client, store, dataset = api_workspace
+    assert client.get('/api/workspaces/validation/progress').json()['phase'] == 'waiting'
+    client.app.state.intake_progress.update('reading', file='demo.pdf', total=6, completed=2, matched=2)
+    response = client.get('/api/workspaces/validation/progress').json()
+    assert response['phase'] == 'reading' and response['completed'] == 2
+    assert response['ready_tickets'] == []
+    assert client.get('/api/workspaces/missing/progress').status_code == 404

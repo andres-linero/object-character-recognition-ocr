@@ -5,16 +5,18 @@ from contextlib import contextmanager, asynccontextmanager
 from pathlib import Path
 import json
 import threading
+import asyncio
 
 import fitz
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import storage as db
+from .intake_watcher import ProgressState
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,13 +31,15 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
     databases = databases or {"workspace": root / "demo_runtime/workspace.sqlite"}
     allowed_roots = allowed_roots or [root / "demo_data", root / "demo_batches", root / "Scans"]
 
+    progress = ProgressState()
+
     @asynccontextmanager
     async def lifespan(app):
         stop = threading.Event()
         worker = None
         if live and Path(databases["workspace"]).is_file():
             from .intake_watcher import watch
-            worker = threading.Thread(target=watch, args=(root, databases["workspace"], root / "Scans/incoming", stop), daemon=True)
+            worker = threading.Thread(target=watch, args=(root, databases["workspace"], root / "Scans/incoming", stop, progress), daemon=True)
             worker.start()
         app.state.intake_worker = worker
         yield
@@ -44,6 +48,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
             worker.join(timeout=1)
 
     app = FastAPI(title="OCR Workspace API", version="1.0.0", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)
+    app.state.intake_progress = progress
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
 
     @contextmanager
@@ -248,6 +253,22 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 .select_from(db.documents.join(db.pages)).where(db.pages.c.page_number == 1).order_by(db.documents.c.path))
             return {"documents": [dict(id=r["id"], name=Path(r["path"]).name, pages=r["page_count"],
                                         synthetic=r["synthetic"], first_page_id=r["first_page_id"]) for r in rows]}
+
+    @app.get("/api/workspaces/{dataset}/progress")
+    def progress_snapshot(dataset):
+        with workspace(dataset):
+            return progress.snapshot()
+
+    @app.get("/api/workspaces/{dataset}/progress/stream")
+    async def progress_stream(dataset, request: Request):
+        with workspace(dataset):
+            pass
+        async def events():
+            while not await request.is_disconnected():
+                yield "data: " + json.dumps(progress.snapshot()) + "\n\n"
+                await asyncio.sleep(1)
+        return StreamingResponse(events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.get("/api/workspaces/{dataset}/activity")
     def activity(dataset):

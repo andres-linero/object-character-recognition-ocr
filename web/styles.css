@@ -2510,3 +2510,184 @@ kbd {
     flex-direction: column;
   }
 }
+
+/* Real worker stages: connected nodes, animated activity, verified completion. */
+.ocr-live-panel {
+  padding: 24px;
+  margin-bottom: 24px;
+  background: linear-gradient(125deg, #f5faff, #fff 65%);
+}
+.ocr-live-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ocr-live-heading h2 {
+  margin: 5px 0 0;
+  font-size: 20px;
+}
+.ocr-live-filename {
+  margin: 16px 0 24px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.ocr-live-steps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0;
+  margin: 0 0 24px;
+  gap: 16px;
+}
+.ocr-live-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 13px;
+  color: #778691;
+}
+.ocr-live-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  height: 2px;
+  background: #dae3eb;
+  top: 17px;
+  left: 45px;
+  right: -7px;
+}
+.ocr-live-step.is-done::after {
+  background: #31a67a;
+}
+.progress-node {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #d8e2ec;
+  border-radius: 50%;
+  background: white;
+  font-weight: 700;
+  position: relative;
+}
+.progress-node svg {
+  width: 19px;
+  height: 19px;
+}
+.ocr-live-step strong {
+  display: block;
+  font-size: 13px;
+}
+.ocr-live-step small {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.ocr-live-step.is-done {
+  color: #16835e;
+}
+.ocr-live-step.is-done .progress-node {
+  background: #e4f5ed;
+  border-color: #49b88d;
+}
+.ocr-live-step.is-active {
+  color: #2162b4;
+}
+.ocr-live-step.is-active .progress-node {
+  border-color: #bbd4f5;
+  background: #edf5ff;
+}
+.ocr-live-step.is-active .progress-node::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border: 2px solid transparent;
+  border-top-color: #397fe0;
+  border-radius: 50%;
+  animation: ocr-stage-spin 1.1s linear infinite;
+}
+.ocr-live-step.is-error {
+  color: #a55a17;
+}
+.ocr-live-step.is-error .progress-node {
+  border-color: #e3ad68;
+  background: #fff4e6;
+}
+.ocr-live-caption {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #607384;
+  font-size: 12px;
+}
+.live-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #387fe0;
+  animation: ocr-stage-pulse 1.5s ease-in-out infinite;
+}
+.ocr-page-progress {
+  height: 5px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 18px;
+  background: #e2eaf2;
+}
+.ocr-page-progress > span {
+  display: block;
+  height: 100%;
+  background: #3581d8;
+  transition: width 0.3s ease;
+}
+.ocr-ready-actions {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+@keyframes ocr-stage-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ocr-stage-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ocr-live-step.is-active .progress-node::before,
+  .live-pulse {
+    animation: none;
+  }
+  .ocr-page-progress > span {
+    transition: none;
+  }
+}
+@media (max-width: 650px) {
+  .ocr-live-steps {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .ocr-live-step {
+    flex-direction: row;
+    align-items: center;
+  }
+  .ocr-live-step:not(:last-child)::after {
+    height: 18px;
+    width: 2px;
+    top: 41px;
+    left: 17px;
+    right: auto;
+  }
+  .progress-node {
+    flex-shrink: 0;
+  }
+  .ocr-live-panel {
+    padding: 18px;
+  }
+}

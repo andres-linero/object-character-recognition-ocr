@@ -30,6 +30,14 @@ async function boot() {
     pretendToBeVisual: true,
   });
   const calls = [];
+  const progressStreams = [];
+  dom.window.EventSource = class {
+    constructor(url) {
+      this.url = url;
+      progressStreams.push(this);
+    }
+    close() {}
+  };
   dom.window.fetch = async (path, options = {}) => {
     calls.push({ path, options });
     let data;
@@ -132,7 +140,13 @@ async function boot() {
   };
   dom.window.eval(script);
   await wait(30);
-  return { dom, window: dom.window, document: dom.window.document, calls };
+  return {
+    dom,
+    window: dom.window,
+    document: dom.window.document,
+    calls,
+    progressStreams,
+  };
 }
 const findButton = (document, text) =>
   [...document.querySelectorAll("button")].find(
@@ -199,5 +213,76 @@ test("ticket drawer exposes the selected order, page evidence, and a six-page do
   assert.match(document.querySelector(".paper-image").alt, /page 6/);
   document.querySelector('[aria-label="Close work order"]').click();
   assert.equal(document.querySelector("[role=dialog]"), null);
+  dom.window.close();
+});
+
+test("live worker events advance connected stages and expose downloads only on PDF readiness", async () => {
+  const { dom, document, progressStreams } = await boot();
+  const stream = progressStreams[0];
+  assert.match(stream.url, /progress\/stream$/);
+  stream.onmessage({
+    data: JSON.stringify({
+      phase: "reading",
+      file: "new_scan.pdf",
+      total: 6,
+      completed: 2,
+      matched: 2,
+      revision: 1,
+    }),
+  });
+  assert.equal(
+    document
+      .querySelector('[aria-label="OCR pages processed"]')
+      .getAttribute("aria-valuenow"),
+    "2",
+  );
+  assert.ok(document.querySelector(".ocr-live-step.is-active"));
+  assert.equal(document.querySelector(".ocr-ready-actions"), null);
+  stream.onmessage({
+    data: JSON.stringify({
+      phase: "ready",
+      file: "new_scan.pdf",
+      total: 6,
+      completed: 6,
+      matched: 6,
+      revision: 2,
+      ready_tickets: [{ id: "ticket-0", work_order: "W-990120" }],
+    }),
+  });
+  assert.equal(document.querySelectorAll(".ocr-live-step.is-done").length, 4);
+  assert.equal(
+    document.querySelector(".ocr-ready-actions a").getAttribute("href"),
+    "/api/workspaces/validation/tickets/ticket-0/download",
+  );
+  stream.onerror();
+  assert.match(
+    document.querySelector("#ocr-live-progress").textContent,
+    /Reconnecting/,
+  );
+  dom.window.close();
+});
+test("unmatched OCR and PDF errors never display a ready confirmation", async () => {
+  const { dom, document, progressStreams } = await boot();
+  progressStreams[0].onmessage({
+    data: JSON.stringify({
+      phase: "error",
+      failed_at: "preparing_pdf",
+      file: "scan.pdf",
+      total: 6,
+      completed: 6,
+      matched: 6,
+      revision: 1,
+      ready_tickets: [],
+    }),
+  });
+  assert.match(
+    document.querySelector(".ocr-live-step.is-error").textContent,
+    /Ticket PDF ready/,
+  );
+  assert.equal(document.querySelector(".ocr-ready-actions"), null);
+  assert.doesNotMatch(
+    document.querySelector("#ocr-live-progress").textContent,
+    /OCR \+ PDF ready/,
+  );
   dom.window.close();
 });

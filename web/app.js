@@ -198,6 +198,210 @@ function heading(title, subtitle, actions = []) {
     el("div", { class: "heading-actions" }, ...actions),
   );
 }
+function liveVerification() {
+  const p = state.liveProgress || {
+    phase: "waiting",
+    total: 0,
+    completed: 0,
+    matched: 0,
+  };
+  const failed = ["error", "needs_attention"].includes(p.phase);
+  const busy = ["receiving", "reading", "matching", "preparing_pdf"].includes(
+    p.phase,
+  );
+  const read = p.total > 0 && p.completed === p.total;
+  const matched = p.total > 0 && p.matched === p.total;
+  const phases = [
+    [
+      "PDF detected",
+      p.total > 0 || p.phase === "ready",
+      p.phase === "receiving",
+      p.total > 0 ? "PDF registered" : "Waiting for a completed file copy",
+    ],
+    [
+      "OCR reading",
+      read,
+      ["reading", "matching"].includes(p.phase) && !read,
+      `${p.completed || 0} / ${p.total || 0} pages processed`,
+    ],
+    [
+      "Matching orders",
+      matched,
+      (p.phase === "matching" || (p.phase === "reading" && p.completed > 0)) &&
+        !matched,
+      `${p.matched || 0} / ${p.total || 0} pages matched`,
+    ],
+    [
+      "Ticket PDF ready",
+      p.phase === "ready",
+      p.phase === "preparing_pdf",
+      p.phase === "ready"
+        ? "Created and checked"
+        : "Created after successful matching",
+    ],
+  ];
+  const failedIndex =
+    p.phase === "needs_attention"
+      ? 2
+      : ({ receiving: 0, reading: 1, matching: 2, preparing_pdf: 3 }[
+          p.failed_at
+        ] ?? 1);
+  const steps = el(
+    "ol",
+    { class: "ocr-live-steps" },
+    ...phases.map(([label, done, active, note], index) => {
+      const error = failed && index === failedIndex;
+      const status = error
+        ? "error"
+        : done
+          ? "done"
+          : active && !failed
+            ? "active"
+            : "waiting";
+      return el(
+        "li",
+        {
+          class: `ocr-live-step is-${status}`,
+          "aria-current": status === "active" ? "step" : null,
+        },
+        el(
+          "span",
+          { class: "progress-node", "aria-hidden": "true" },
+          done && !error ? icon("check") : error ? "!" : index + 1,
+        ),
+        el(
+          "div",
+          {},
+          el("strong", {}, label),
+          el("small", {}, error ? "Needs attention" : note),
+        ),
+      );
+    }),
+  );
+  const panel = el(
+    "section",
+    {
+      id: "ocr-live-progress",
+      class: `panel ocr-live-panel ${failed ? "has-error" : ""}`,
+      "aria-label": "Live OCR verification",
+      "aria-live": "polite",
+      "aria-busy": busy,
+    },
+    el(
+      "div",
+      { class: "ocr-live-heading" },
+      el(
+        "div",
+        {},
+        el("div", { class: "eyebrow" }, "LIVE PROCESSING"),
+        el("h2", {}, "OCR Verification"),
+      ),
+      badge(
+        state.progressOffline
+          ? "Reconnecting…"
+          : p.phase === "ready"
+            ? "OCR + PDF ready"
+            : failed
+              ? "Needs attention"
+              : busy
+                ? "Processing"
+                : "Watching intake",
+        p.phase === "ready" ? "green" : failed ? "amber" : "blue",
+      ),
+    ),
+    el(
+      "p",
+      { class: "ocr-live-filename" },
+      p.file || "Waiting for your next PDF",
+    ),
+    steps,
+    el(
+      "div",
+      { class: "ocr-live-caption" },
+      busy ? el("span", { class: "live-pulse", "aria-hidden": "true" }) : null,
+      el(
+        "span",
+        {},
+        state.progressOffline
+          ? "Live connection interrupted. Reconnecting automatically; processing continues."
+          : p.message || "Place a demo PDF in Scans/incoming to start.",
+      ),
+    ),
+  );
+  if (p.total > 0)
+    panel.append(
+      el(
+        "div",
+        {
+          class: "ocr-page-progress",
+          role: "progressbar",
+          "aria-label": "OCR pages processed",
+          "aria-valuemin": 0,
+          "aria-valuemax": p.total,
+          "aria-valuenow": p.completed || 0,
+        },
+        el("span", {
+          style: {
+            width: `${Math.min(100, ((p.completed || 0) / p.total) * 100)}%`,
+          },
+        }),
+      ),
+    );
+  if (p.phase === "ready")
+    panel.append(
+      el(
+        "div",
+        { class: "ocr-ready-actions" },
+        ...(p.ready_tickets || []).map((ticket) =>
+          el(
+            "a",
+            {
+              class: "button primary",
+              href: `${base()}/tickets/${ticket.id}/download`,
+            },
+            icon("down"),
+            `Download ${ticket.work_order}`,
+          ),
+        ),
+      ),
+    );
+  return panel;
+}
+function updateLiveVerification() {
+  document
+    .querySelectorAll("#ocr-live-progress")
+    .forEach((node) => node.replaceWith(liveVerification()));
+}
+function connectLiveProgress() {
+  if (typeof window.EventSource !== "function") return;
+  state.progressSource?.close();
+  const source = new window.EventSource(`${base()}/progress/stream`);
+  state.progressSource = source;
+  source.onmessage = (event) => {
+    try {
+      const progress = JSON.parse(event.data);
+      if (
+        state.liveProgress?.revision === progress.revision &&
+        !state.progressOffline
+      )
+        return;
+      state.liveProgress = progress;
+      state.progressOffline = false;
+      updateLiveVerification();
+    } catch {
+      /* Ignore malformed transport data; keep the last known state. */
+    }
+  };
+  source.onerror = () => {
+    state.progressOffline = true;
+    updateLiveVerification();
+  };
+  source.onopen = () => {
+    state.progressOffline = false;
+    updateLiveVerification();
+  };
+}
+
 function summaryCards() {
   const s = state.scanCounts || {};
   const total = s.files ?? 0,
@@ -731,6 +935,7 @@ function overview() {
       ],
     ),
     summaryCards(),
+    liveVerification(),
   );
   const coverage = s.pages ? Math.round((s.verified_pages / s.pages) * 100) : 0;
   const coveragePanel = el(
@@ -930,7 +1135,7 @@ function activity(rows) {
       "Newest source files first. Company and jobsite come from the matched tracker record. Rental agreement numbers are not recorded in this dataset; Shipment/SO is shown separately.",
     ),
   );
-  main.append(summaryCards());
+  main.append(liveVerification(), summaryCards());
   if (!rows.length) {
     main.append(
       empty(
@@ -1599,6 +1804,7 @@ async function boot() {
     const route = location.hash.slice(2);
     state.view = navItems.some((n) => n[0] === route) ? route : "ocr";
     await loadView();
+    connectLiveProgress();
     window.setInterval(() => {
       if (
         ["ocr", "overview", "documents"].includes(state.view) &&
