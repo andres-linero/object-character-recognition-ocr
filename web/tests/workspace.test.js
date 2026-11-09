@@ -295,3 +295,28 @@ test("Overview replaces the old verification ring with one live verification pan
   assert.equal(document.querySelector(".coverage-panel"), null);
   dom.window.close();
 });
+
+test("dragging a PDF submits it to the watched intake and keeps connected-dot layout", async () => {
+  const { dom, document, calls } = await boot();
+  assert.equal(document.querySelectorAll(".progress-dot").length, 4);
+  assert.equal(document.querySelectorAll(".progress-connector-fill").length, 3);
+  const file = new dom.window.File(["demo PDF"], "demo_scan.pdf", {
+    type: "application/pdf",
+  });
+  const drop = new dom.window.Event("drop", {
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(drop, "dataTransfer", { value: { files: [file] } });
+  document.querySelector("#pdf-dropzone").dispatchEvent(drop);
+  await wait(25);
+  const upload = calls.find((call) => call.path.endsWith("/intake"));
+  assert.equal(upload.options.method, "POST");
+  assert.equal(upload.options.body, file);
+  assert.match(
+    document.querySelector(".intake-upload-status").textContent,
+    /OCR will start automatically/,
+  );
+  assert.equal(document.querySelectorAll("#navigation button").length, 6);
+  dom.window.close();
+});

@@ -198,6 +198,102 @@ function heading(title, subtitle, actions = []) {
     el("div", { class: "heading-actions" }, ...actions),
   );
 }
+function intakeDropzone() {
+  const input = el("input", {
+    type: "file",
+    accept: ".pdf,application/pdf",
+    multiple: true,
+    class: "intake-file-input",
+    "aria-label": "Select PDF files",
+    onChange: (event) => uploadIntakeFiles(event.target.files),
+  });
+  const choose = button(
+    state.uploading ? "Adding PDFs…" : "Choose PDF",
+    () => input.click(),
+    "button secondary",
+    "upload",
+  );
+  choose.disabled = !!state.uploading;
+  const zone = el(
+    "section",
+    {
+      id: "pdf-dropzone",
+      class: "intake-dropzone",
+      "aria-label": "PDF intake",
+      onDragOver: (event) => {
+        event.preventDefault();
+        if (!state.uploading) zone.classList.add("is-dragging");
+      },
+      onDragLeave: (event) => {
+        if (!zone.contains(event.relatedTarget))
+          zone.classList.remove("is-dragging");
+      },
+      onDrop: (event) => {
+        event.preventDefault();
+        zone.classList.remove("is-dragging");
+        uploadIntakeFiles(event.dataTransfer?.files);
+      },
+    },
+    icon("upload"),
+    el(
+      "div",
+      { class: "intake-drop-copy" },
+      el("strong", {}, "Drop a PDF to start OCR"),
+      el(
+        "p",
+        {},
+        "Or choose a file. It goes into the same watched intake folder.",
+      ),
+      el(
+        "small",
+        { class: "intake-upload-status", role: "status" },
+        state.uploadMessage || "Generated demo PDFs · up to 50 MB per file",
+      ),
+    ),
+    input,
+    choose,
+  );
+  return zone;
+}
+async function uploadIntakeFiles(files) {
+  if (state.uploading || !files?.length) return;
+  const selected = Array.from(files);
+  if (
+    selected.some(
+      (file) =>
+        !file.name.toLowerCase().endsWith(".pdf") ||
+        file.size > 50 * 1024 * 1024,
+    )
+  ) {
+    state.uploadMessage = "Choose PDF files no larger than 50 MB.";
+    document.querySelector("#pdf-dropzone")?.replaceWith(intakeDropzone());
+    return;
+  }
+  state.uploading = true;
+  let added = 0;
+  state.uploadMessage = `Adding ${selected.length} PDF file(s) to intake…`;
+  document.querySelector("#pdf-dropzone")?.replaceWith(intakeDropzone());
+  try {
+    for (const file of selected) {
+      await api(`${base()}/intake`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/pdf",
+          "X-File-Name": encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      added++;
+    }
+    state.uploadMessage = `${added} PDF file(s) added. OCR will start automatically.`;
+  } catch (error) {
+    state.uploadMessage = `${added ? `${added} added. ` : ""}${error.message}`;
+  } finally {
+    state.uploading = false;
+    document.querySelector("#pdf-dropzone")?.replaceWith(intakeDropzone());
+  }
+}
+
 function liveVerification() {
   const p = state.liveProgress || {
     phase: "waiting",
@@ -267,7 +363,7 @@ function liveVerification() {
         el(
           "span",
           { class: "progress-node", "aria-hidden": "true" },
-          done && !error ? icon("check") : error ? "!" : index + 1,
+          error ? "!" : el("span", { class: "progress-dot" }),
         ),
         el(
           "div",
@@ -275,6 +371,24 @@ function liveVerification() {
           el("strong", {}, label),
           el("small", {}, error ? "Needs attention" : note),
         ),
+        index < 3
+          ? el(
+              "span",
+              { class: "progress-connector", "aria-hidden": "true" },
+              el("span", {
+                class: "progress-connector-fill",
+                "data-fill": error
+                  ? 0
+                  : done
+                    ? 1
+                    : index === 1 && p.total
+                      ? p.completed / p.total
+                      : index === 2 && p.total
+                        ? p.matched / p.total
+                        : 0,
+              }),
+            )
+          : null,
       );
     }),
   );
@@ -365,12 +479,25 @@ function liveVerification() {
         ),
       ),
     );
+  panel
+    .querySelectorAll(".progress-connector-fill")
+    .forEach((line) => line.style.setProperty("--fill", line.dataset.fill));
   return panel;
 }
 function updateLiveVerification() {
-  document
-    .querySelectorAll("#ocr-live-progress")
-    .forEach((node) => node.replaceWith(liveVerification()));
+  document.querySelectorAll("#ocr-live-progress").forEach((node) => {
+    const previous = [...node.querySelectorAll(".progress-connector-fill")].map(
+      (line) => line.dataset.fill,
+    );
+    const next = liveVerification();
+    next.querySelectorAll(".progress-connector-fill").forEach((line, index) => {
+      line.style.setProperty("--fill", previous[index] || 0);
+      window.requestAnimationFrame(() =>
+        line.style.setProperty("--fill", line.dataset.fill),
+      );
+    });
+    node.replaceWith(next);
+  });
 }
 function connectLiveProgress() {
   if (typeof window.EventSource !== "function") return;
@@ -936,6 +1063,7 @@ function overview() {
     ),
     summaryCards(),
     liveVerification(),
+    intakeDropzone(),
   );
   const actions = [
     [
@@ -1089,7 +1217,7 @@ function activity(rows) {
       "Newest source files first. Company and jobsite come from the matched tracker record. Rental agreement numbers are not recorded in this dataset; Shipment/SO is shown separately.",
     ),
   );
-  main.append(liveVerification(), summaryCards());
+  main.append(liveVerification(), intakeDropzone(), summaryCards());
   if (!rows.length) {
     main.append(
       empty(
@@ -1763,6 +1891,7 @@ async function boot() {
       if (
         ["ocr", "overview", "documents"].includes(state.view) &&
         !state.detail &&
+        !state.uploading &&
         !document.hidden
       )
         loadView();

@@ -6,6 +6,8 @@ from pathlib import Path
 import json
 import threading
 import asyncio
+import re
+from urllib.parse import unquote
 
 import fitz
 from fastapi import FastAPI, HTTPException, Request
@@ -19,6 +21,7 @@ from . import storage as db
 from .intake_watcher import ProgressState
 
 ROOT = Path(__file__).resolve().parents[1]
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 class ReviewChange(BaseModel):
@@ -253,6 +256,49 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 .select_from(db.documents.join(db.pages)).where(db.pages.c.page_number == 1).order_by(db.documents.c.path))
             return {"documents": [dict(id=r["id"], name=Path(r["path"]).name, pages=r["page_count"],
                                         synthetic=r["synthetic"], first_page_id=r["first_page_id"]) for r in rows]}
+
+    @app.post("/api/workspaces/{dataset}/intake")
+    async def upload_pdf(dataset, request: Request):
+        origin = request.headers.get('origin')
+        if origin and origin.rstrip('/') != str(request.base_url).rstrip('/'):
+            raise HTTPException(403, 'Cross-origin uploads are not allowed')
+        with workspace(dataset):
+            pass
+        name = unquote(request.headers.get('x-file-name', 'scan.pdf'))
+        if Path(name).name != name or '\\' in name or Path(name).suffix.lower() != '.pdf':
+            raise HTTPException(400, 'Choose a PDF file with a plain filename')
+        if request.headers.get('content-type', '').split(';')[0] != 'application/pdf':
+            raise HTTPException(415, 'Only PDF uploads are accepted')
+        maximum = MAX_UPLOAD_BYTES
+        incoming = root / 'Scans/incoming'
+        staging = root / 'Scans/.uploads'
+        incoming.mkdir(parents=True, exist_ok=True)
+        staging.mkdir(parents=True, exist_ok=True)
+        temporary = staging / f'{db.uid()}.part'
+        try:
+            total = 0
+            with temporary.open('wb') as output:
+                async for chunk in request.stream():
+                    total += len(chunk)
+                    if total > maximum:
+                        raise HTTPException(413, 'PDF files must be 50 MB or smaller')
+                    output.write(chunk)
+            try:
+                with fitz.open(temporary) as pdf:
+                    if pdf.is_encrypted or len(pdf) < 1:
+                        raise ValueError('Unreadable PDF')
+            except Exception:
+                raise HTTPException(422, 'This file is not a readable, unencrypted PDF') from None
+            from .etl import checksum
+            from .intake_watcher import known_demo_hashes
+            if checksum(temporary) not in known_demo_hashes(root):
+                raise HTTPException(422, 'Use a generated demo PDF from the sample folder')
+            safe_name = re.sub(r'[^A-Za-z0-9._-]', '_', Path(name).stem)[:80] or 'scan'
+            target = incoming / f'{safe_name}-{db.uid()[:8]}.pdf'
+            temporary.replace(target)
+            return {"status": "queued", "file": target.name}
+        finally:
+            temporary.unlink(missing_ok=True)
 
     @app.get("/api/workspaces/{dataset}/progress")
     def progress_snapshot(dataset):

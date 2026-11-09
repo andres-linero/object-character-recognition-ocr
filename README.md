@@ -18,7 +18,7 @@ sh scripts/run_web.sh
 
 Open **http://127.0.0.1:8700**. The tabs are Overview, Dataset (tracker records), Documents, OCR activity, Review queue, and Ingestion history. There is one live workspace, with no test-stage dropdown. Source records do not become scanned files until a PDF is placed into intake.
 
-Place a generated demo PDF in **`Scans/incoming/`**. While the server is running, its background worker waits for the copy to stabilize, preserves a source snapshot, and invokes Azure OCR for each unattempted page. Configure `AZURE_DOC_INTEL_ENDPOINT` and `AZURE_DOC_INTEL_KEY` in your local `.env` first; processing incurs provider charges. The view refreshes every five seconds. The local unauthenticated demo accepts PDFs matching the generated fixture manifests; unknown files are skipped rather than labeled synthetic.
+Drag a generated demo PDF onto **Drop a PDF to start OCR**, use **Choose PDF**, or place it directly in **`Scans/incoming/`**. Browser uploads are limited to 50 MB and use the same watched-folder workflow. While the server is running, its background worker waits for the copy to stabilize, preserves a source snapshot, and invokes Azure OCR for each unattempted page. Configure `AZURE_DOC_INTEL_ENDPOINT` and `AZURE_DOC_INTEL_KEY` in your local `.env` first; processing incurs provider charges. The view refreshes every five seconds. The local unauthenticated demo accepts PDFs matching the generated fixture manifests; unknown files are skipped rather than labeled synthetic.
 
 The three new sample PDFs wait outside intake at **`demo_batches/intake_test_03/ready_to_scan/`**. Move or copy one into `Scans/incoming/` to test automatic detection. Earlier test databases remain local archives and are not exposed as separate workspaces.
 

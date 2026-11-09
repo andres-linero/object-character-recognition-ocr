@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+import errno
 import threading
 from copy import deepcopy
 
@@ -76,11 +77,12 @@ def prepare_ticket_pdfs(store, document_id, output):
 
 
 class IntakeWatcher:
-    def __init__(self, store, folder, allowed_hashes, extractor=None, stop=None, progress=None):
+    def __init__(self, store, folder, allowed_hashes, extractor=None, stop=None, progress=None, root=None):
         self.store = store
         self.folder = Path(folder).resolve()
         self.folder.mkdir(parents=True, exist_ok=True)
-        self.allowed_hashes = allowed_hashes
+        self.allowed_hashes = set(allowed_hashes)
+        self.root = Path(root) if root is not None else None
         self.extractor = extractor
         self.stop = stop
         self.progress = progress or ProgressState()
@@ -102,6 +104,8 @@ class IntakeWatcher:
                 continue
             try:
                 digest = checksum(path)
+                if digest not in self.allowed_hashes and self.root is not None:
+                    self.allowed_hashes.update(known_demo_hashes(self.root))
                 if digest not in self.allowed_hashes:
                     self.progress.update('error', failed_at='receiving', message='This file is not a recognized demo PDF.')
                     LOG.warning('Intake skipped an unrecognized file; this workspace accepts generated demo PDFs.')
@@ -173,6 +177,32 @@ def known_demo_hashes(root):
     return hashes
 
 
+def _try_worker_lock(lock):
+    if os.name == 'nt':
+        import msvcrt
+        lock.seek(0)
+        lock.write(b'0')
+        lock.flush()
+        lock.seek(0)
+        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _acquire_worker_lock(lock, stop, progress):
+    while not stop.is_set():
+        try:
+            _try_worker_lock(lock)
+            return True
+        except OSError as exc:
+            if exc.errno not in {errno.EACCES, errno.EAGAIN}:
+                raise
+            progress.update('waiting', message='Waiting for the previous intake worker to stop.')
+            stop.wait(1)
+    return False
+
+
 def watch(root, database, folder, stop, progress=None):
     """Hold an OS lock for the worker lifetime, including all provider calls."""
     progress = progress or ProgressState()
@@ -180,16 +210,9 @@ def watch(root, database, folder, stop, progress=None):
     database.parent.mkdir(parents=True, exist_ok=True)
     lock = (database.parent / 'intake-worker.lock').open('a+b')
     try:
-        if os.name == 'nt':
-            import msvcrt
-            lock.seek(0)
-            lock.write(b'0')
-            lock.flush()
-            lock.seek(0)
-            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if not _acquire_worker_lock(lock, stop, progress):
+            return
+        progress.update('waiting', message='Waiting for a PDF in Scans/incoming.')
         from dotenv import dotenv_values
         values = dotenv_values(root / '.env')
         for key in ('AZURE_DOC_INTEL_ENDPOINT', 'AZURE_DOC_INTEL_KEY'):
@@ -202,7 +225,7 @@ def watch(root, database, folder, stop, progress=None):
         store = db.Store(db.sqlite_url(database))
         try:
             allowed = known_demo_hashes(root) | {row['sha256'] for row in store.rows(select(db.documents).where(db.documents.c.synthetic.is_(True)))}
-            worker = IntakeWatcher(store, folder, allowed, stop=stop, progress=progress)
+            worker = IntakeWatcher(store, folder, allowed, stop=stop, progress=progress, root=root)
             while not stop.is_set():
                 worker.tick()
                 stop.wait(2)

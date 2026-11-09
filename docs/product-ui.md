@@ -36,3 +36,13 @@ The display connects **PDF detected → OCR reading → Matching orders → Tick
 Readiness requires successful current-page attempts, unambiguous actual associations, enough associated pages for the order's expected count, and successful PDF creation/reopening. The worker writes checked ticket artifacts under `Scans/output/`. Unreadable/unmatched pages or PDF write failures display attention/error states and never show a ready confirmation. Download actions appear on the live panel only after completion.
 
 `GET /api/workspaces/{dataset}/progress` returns the current snapshot; `/progress/stream` streams it. This status is per live worker process and resets on server restart; SQL attempts and PDF outputs persist. Existing incoming PDFs are reconciled on restart without new OCR calls for already attempted pages. Generator manifests retain PDF checksums so moving a sample before server startup still permits recognition. No input samples were placed into intake or submitted to Azure for this UI revision.
+
+## Connected dots and drag-and-drop
+
+The live verification display keeps the existing layout. Stage dots fill on completion; connecting lines fill from actual processed/matched page ratios and animate between updates. Reduced-motion settings disable transition/pulse effects.
+
+Overview and OCR activity also provide a compact drop area with a Choose PDF button. Dropped files are streamed to temporary storage, checked as readable, unencrypted generated demo PDFs, and atomically moved into the same `Scans/incoming/` folder. The existing watcher handles detection, OCR, matching and PDF creation. The browser reports queued intake separately from OCR completion. Original sample files are never moved by browser uploads.
+
+Uploads are limited to 50 MB per PDF, validate filenames, enforce same-origin browser requests, and clean up temporary files after failure. The raw PDF request API is `POST /api/workspaces/{dataset}/intake`, using `Content-Type: application/pdf` and a URL-encoded `X-File-Name` header. Multiple selected files are queued sequentially. New generator manifests created while the server is running are recognized when an unknown input is checked.
+
+Live-connection shutdown uses a bounded graceful timeout. A replacement worker waits for the old worker's OS lock rather than abandoning automatic detection during a server restart. Avoid restarting while a paid page call is in flight; interrupted attempts are retained for deliberate recovery.

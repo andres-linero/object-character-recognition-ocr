@@ -161,3 +161,30 @@ def test_progress_snapshot_reports_worker_state_and_respects_workspace_boundary(
     assert response['phase'] == 'reading' and response['completed'] == 2
     assert response['ready_tickets'] == []
     assert client.get('/api/workspaces/missing/progress').status_code == 404
+
+
+def test_pdf_drop_queues_a_valid_demo_file_in_the_existing_watch_folder(api_workspace):
+    client, store, dataset = api_workspace
+    sample = next((dataset / 'incoming_scans').glob('*.pdf'))
+    response = client.post('/api/workspaces/validation/intake', content=sample.read_bytes(),
+                           headers={'content-type': 'application/pdf', 'x-file-name': 'my_scan.pdf'})
+    assert response.status_code == 200
+    assert response.json()['status'] == 'queued'
+    uploaded = dataset.parent / 'Scans/incoming' / response.json()['file']
+    assert uploaded.read_bytes() == sample.read_bytes()
+    assert sample.is_file()
+    assert not list((dataset.parent / 'Scans/.uploads').glob('*.part'))
+
+
+def test_pdf_drop_rejects_invalid_input_and_cross_origin_requests(api_workspace, monkeypatch):
+    client, store, dataset = api_workspace
+    route = '/api/workspaces/validation/intake'
+    headers = {'content-type': 'application/pdf', 'x-file-name': 'scan.pdf'}
+    assert client.post(route, content=b'not PDF', headers=headers).status_code == 422
+    assert client.post(route, content=b'not PDF', headers={**headers, 'x-file-name': '../scan.pdf'}).status_code == 400
+    assert client.post(route, content=b'not PDF', headers={**headers, 'origin': 'https://outside.invalid'}).status_code == 403
+    assert client.post(route, content=b'not PDF', headers={**headers, 'content-type': 'text/plain'}).status_code == 415
+    from ADK_Agentic import web_api
+    monkeypatch.setattr(web_api, 'MAX_UPLOAD_BYTES', 2)
+    assert client.post(route, content=b'123', headers=headers).status_code == 413
+    assert not list((dataset.parent / 'Scans/.uploads').glob('*.part'))

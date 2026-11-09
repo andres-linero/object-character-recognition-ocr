@@ -106,3 +106,22 @@ def test_generated_manifest_recognizes_sample_moved_before_app_starts(tmp_path):
     incoming.mkdir(parents=True)
     shutil.move(sample, incoming / sample.name)
     assert digest in known_demo_hashes(tmp_path)
+
+
+def test_worker_waits_for_old_live_connection_to_release_lock(tmp_path, monkeypatch):
+    import errno
+    import threading
+    from ADK_Agentic import intake_watcher
+    attempts = []
+    def lock_after_restart(lock):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise BlockingIOError(errno.EAGAIN, 'previous worker still shutting down')
+    monkeypatch.setattr(intake_watcher, '_try_worker_lock', lock_after_restart)
+    stop = threading.Event()
+    monkeypatch.setattr(stop, 'wait', lambda seconds: False)
+    progress = intake_watcher.ProgressState()
+    with (tmp_path / 'worker.lock').open('a+b') as lock:
+        assert intake_watcher._acquire_worker_lock(lock, stop, progress)
+    assert len(attempts) == 2
+    assert progress.snapshot()['phase'] == 'waiting'
