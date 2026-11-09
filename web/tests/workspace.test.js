@@ -286,3 +286,12 @@ test("unmatched OCR and PDF errors never display a ready confirmation", async ()
   );
   dom.window.close();
 });
+
+test("Overview replaces the old verification ring with one live verification panel", async () => {
+  const { dom, document } = await boot();
+  findButton(document, "Overview").click();
+  await wait(25);
+  assert.equal(document.querySelectorAll("#ocr-live-progress").length, 1);
+  assert.equal(document.querySelector(".coverage-panel"), null);
+  dom.window.close();
+});

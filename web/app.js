@@ -937,52 +937,6 @@ function overview() {
     summaryCards(),
     liveVerification(),
   );
-  const coverage = s.pages ? Math.round((s.verified_pages / s.pages) * 100) : 0;
-  const coveragePanel = el(
-    "section",
-    { class: "panel coverage-panel" },
-    el(
-      "div",
-      { class: "section-heading" },
-      el("h2", {}, "OCR verification"),
-      badge(
-        s.verified_pages ? "Verified with Azure" : "Ready to process",
-        s.verified_pages ? "green" : "neutral",
-        "shield",
-      ),
-    ),
-    el(
-      "div",
-      { class: "coverage-content" },
-      el(
-        "div",
-        { class: "coverage-ring", style: { "--coverage": `${coverage}%` } },
-        el(
-          "div",
-          {},
-          el("strong", {}, `${coverage}%`),
-          el("small", {}, "pages matched"),
-        ),
-      ),
-      el(
-        "div",
-        {},
-        el("h3", {}, `${s.verified_pages} pages, connected.`),
-        el(
-          "p",
-          {},
-          `${s.documents} source documents. ${s.tickets} organized work orders. Every matched page links back to its original document.`,
-        ),
-        el(
-          "small",
-          { class: "muted" },
-          s.last_verified_at
-            ? `Last verified ${time(s.last_verified_at)}`
-            : "No live OCR attempts yet.",
-        ),
-      ),
-    ),
-  );
   const actions = [
     [
       "orders",
@@ -1019,7 +973,7 @@ function overview() {
       ),
     );
   }
-  main.append(el("div", { class: "overview-grid" }, coveragePanel, quickPanel));
+  main.append(quickPanel);
   const recent = el("div", { class: "recent-list" });
   for (const ticket of state.tickets.slice(0, 5)) {
     recent.append(
