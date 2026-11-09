@@ -181,6 +181,7 @@ def test_pdf_drop_rejects_invalid_input_and_cross_origin_requests(api_workspace,
     route = '/api/workspaces/validation/intake'
     headers = {'content-type': 'application/pdf', 'x-file-name': 'scan.pdf'}
     assert client.post(route, content=b'not PDF', headers=headers).status_code == 422
+    assert client.post(route, content=b'%PDF-1.7\ntruncated document', headers=headers).status_code == 422
     assert client.post(route, content=b'not PDF', headers={**headers, 'x-file-name': '../scan.pdf'}).status_code == 400
     assert client.post(route, content=b'not PDF', headers={**headers, 'origin': 'https://outside.invalid'}).status_code == 403
     assert client.post(route, content=b'not PDF', headers={**headers, 'content-type': 'text/plain'}).status_code == 415

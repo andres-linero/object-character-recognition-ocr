@@ -284,7 +284,9 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                         raise HTTPException(413, 'PDF files must be 50 MB or smaller')
                     output.write(chunk)
             try:
-                with fitz.open(temporary) as pdf:
+                # Validate bounded bytes so a failed MuPDF open cannot retain
+                # a Windows file handle and prevent temporary-file cleanup.
+                with fitz.open(stream=temporary.read_bytes(), filetype='pdf') as pdf:
                     if pdf.is_encrypted or len(pdf) < 1:
                         raise ValueError('Unreadable PDF')
             except Exception:
