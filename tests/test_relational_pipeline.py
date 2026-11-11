@@ -60,18 +60,18 @@ def test_repeat_loads_upsert_and_keep_provenance(store, tmp_path):
     assert store.order_rows()[0]["Status"] == "COMPLETE"
     assert store.counts()["orders"] == 1
     store.migrate()  # migration version remains stable on repeated startup
-    assert len(store.rows(select(db.versions))) == 1
+    assert len(store.rows(select(db.versions))) == 5
 
 
-def test_invalid_rows_are_quarantined_and_duplicate_shipments_do_not_corrupt(store, tmp_path):
+def test_invalid_rows_are_quarantined_and_multiple_work_orders_can_share_a_shipment(store, tmp_path):
     good = dict(Order_ID="W-900001", SO="800001", Customer_name="Demo", Status="OPEN")
     bad = dict(good, Order_ID="bad")
     duplicate = dict(good, Order_ID="W-900002")
     result = etl.ingest_tracker(store, tracker(tmp_path / "invalid.csv", [good, bad, duplicate]))
-    assert result["rows_loaded"] == 1
-    assert result["rows_rejected"] == 2
-    assert store.counts()["orders"] == 1
-    assert store.counts()["rejected_rows"] == 2
+    assert result["rows_loaded"] == 2
+    assert result["rows_rejected"] == 1
+    assert store.counts()["orders"] == 2
+    assert store.counts()["rejected_rows"] == 1
     assert store.rows(select(db.runs))[0]["status"] == "partial"
 
 

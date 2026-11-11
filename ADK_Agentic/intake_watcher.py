@@ -22,8 +22,8 @@ class ProgressState:
     """Thread-safe worker evidence for the live UI; never includes provider text."""
     def __init__(self):
         self.lock = threading.Lock()
-        self.value = dict(phase='waiting', file=None, total=0, completed=0, matched=0,
-                          ready_tickets=[], message='Waiting for a PDF in Scans/incoming.', revision=0)
+        self.value = dict(phase='waiting', file=None, document_id=None, total=0, completed=0, matched=0,
+                          ready_tickets=[], message='Waiting for a PDF upload.', revision=0)
 
     def update(self, phase, **values):
         with self.lock:
@@ -34,14 +34,16 @@ class ProgressState:
             return deepcopy(self.value)
 
 
-def prepare_ticket_pdfs(store, document_id, output):
+def prepare_ticket_pdfs(store, document_id, output, allow_partial=False):
     """Create and open real ticket PDFs before announcing readiness."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     links = store.rows(select(db.associations.c.order_id).select_from(db.associations.join(db.pages))
                        .where(db.pages.c.document_id == document_id, db.associations.c.method == 'azure_ocr'))
-    order_ids = {row['order_id'] for row in links}
-    if not order_ids:
+    approvals = store.rows(select(db.page_approvals))
+    document_pages = {r['id'] for r in store.rows(select(db.pages.c.id).where(db.pages.c.document_id == document_id))}
+    order_ids = {row['order_id'] for row in links} | {r['order_id'] for r in approvals if r['page_id'] in document_pages}
+    if not order_ids and not allow_partial:
         raise ValueError('No matched orders')
     ready = []
     for order_id in sorted(order_ids):
@@ -50,17 +52,37 @@ def prepare_ticket_pdfs(store, document_id, output):
             .select_from(db.associations.join(db.pages).join(db.documents))
             .where(db.associations.c.order_id == order_id, db.associations.c.method == 'azure_ocr')
             .order_by(db.documents.c.path, db.pages.c.page_number))
+        approved = {r['page_id']: r for r in approvals if r['order_id'] == order_id}
+        if approved:
+            manual = store.rows(select(db.pages.c.id, db.pages.c.page_number, db.documents.c.path)
+                .select_from(db.pages.join(db.documents)).where(db.pages.c.id.in_(list(approved))))
+            pages = list({p['id']: p for p in [*pages, *manual]}.values())
         ids = {page['id'] for page in pages}
         memberships = store.rows(select(db.associations).where(db.associations.c.page_id.in_(ids), db.associations.c.method == 'azure_ocr'))
-        if any(len({link['order_id'] for link in memberships if link['page_id'] == page_id}) != 1 for page_id in ids):
+        if any(len({link['order_id'] for link in memberships if link['page_id'] == page_id} | {a['order_id'] for a in approvals if a['page_id'] == page_id}) != 1 for page_id in ids - set(approved)):
+            if allow_partial:
+                continue
             raise ValueError('Ambiguous page association')
         latest = {}
         for attempt in store.rows(select(db.attempts).where(db.attempts.c.page_id.in_(ids)).order_by(db.attempts.c.started_at)):
             latest[attempt['page_id']] = attempt['status']
-        if any(latest.get(page_id) != 'success' for page_id in ids):
+        if any(latest.get(page_id) != 'success' for page_id in ids - set(approved)):
+            if allow_partial:
+                continue
             raise ValueError('Some associated pages are not verified')
         if len(pages) < (order['expected_pages'] or 1):
+            if allow_partial:
+                continue
             raise ValueError('Order still has missing pages')
+        if order['source_sheet'] == 'document_fields':
+            evidence = {r['id']: r['payload'] for r in store.rows(select(db.raw_rows).where(db.raw_rows.c.id.in_(ids)))}
+            numbered = [(approved[p['id']]['printed_page'] if p['id'] in approved else evidence.get(p['id'], {}).get('page_number'), p) for p in pages]
+            sequence = [number for number, _ in numbered]
+            if len(pages) != order['expected_pages'] or set(sequence) != set(range(1, order['expected_pages'] + 1)):
+                if allow_partial:
+                    continue
+                raise ValueError('Missing or duplicate printed pages')
+            pages = [p for _, p in sorted(numbered, key=lambda item: item[0])]
         target = output / f'ticket-{order_id}.pdf'
         temporary = target.with_suffix('.part')
         with fitz.open() as pdf:
@@ -89,19 +111,21 @@ class IntakeWatcher:
         self.observed = {}
         self.finished = {}
 
-    def tick(self):
+    def tick(self, submitted=None):
         """Wait for two identical file observations before reading a completed copy."""
-        for path in sorted(self.folder.iterdir(), key=lambda p: p.name):
+        paths = [Path(submitted)] if submitted is not None else sorted(self.folder.iterdir(), key=lambda p: p.name)
+        for path in paths:
             if path.suffix.lower() != '.pdf' or path.is_symlink() or not path.is_file():
                 continue
             signature = (path.stat().st_size, path.stat().st_mtime_ns)
             if self.finished.get(path.name) == signature:
                 continue
-            if self.observed.get(path.name) != signature:
-                self.progress.update('receiving', file=path.name, total=0, completed=0, matched=0,
+            if submitted is None and self.observed.get(path.name) != signature:
+                self.progress.update('receiving', file=path.name, document_id=None, total=0, completed=0, matched=0,
                                      ready_tickets=[], message='Waiting for the PDF copy to finish.')
                 self.observed[path.name] = signature
                 continue
+            pages, statuses = [], {}
             try:
                 digest = checksum(path)
                 if digest not in self.allowed_hashes and self.root is not None:
@@ -111,6 +135,11 @@ class IntakeWatcher:
                     LOG.warning('Intake skipped an unrecognized file; this workspace accepts generated demo PDFs.')
                     self.finished[path.name] = signature
                     continue
+                if submitted is not None:
+                    with fitz.open(path) as pdf:
+                        page_count = len(pdf)
+                    self.progress.update('receiving', file=path.name, document_id=None, total=page_count, completed=0,
+                                         matched=0, ready_tickets=[], message=f'PDF received: {page_count} pages queued for OCR.')
                 archive = self.folder.parent / 'processed' / digest / path.name
                 archive.parent.mkdir(parents=True, exist_ok=True)
                 if not archive.exists():
@@ -130,7 +159,7 @@ class IntakeWatcher:
                 def report(phase):
                     completed = sum(statuses.get(p['id']) in {'success', 'no_match', 'error'} for p in pages)
                     matched = sum(statuses.get(p['id']) == 'success' for p in pages)
-                    self.progress.update(phase, total=len(pages), completed=completed, matched=matched,
+                    self.progress.update(phase, document_id=document_id, total=len(pages), completed=completed, matched=matched,
                                          message=f'{matched} of {len(pages)} pages matched.')
                 report('reading')
                 for page in pages:
@@ -140,40 +169,71 @@ class IntakeWatcher:
                         continue
                     report('reading')
                     result = process_page(self.store, page['id'], 'demo', self.extractor,
-                                          on_stage=lambda phase: report(phase))
+                                          on_stage=lambda phase: report(phase), document_driven=self.root is not None)
                     statuses[page['id']] = result['status']
                     report('matching')
                     LOG.info('Intake OCR page %s: %s', page['page_number'], result['status'])
                     if result.get('error_code') in {'HTTP401', 'HTTP403', 'HTTP404'}:
                         raise RuntimeError('Provider configuration rejected')
-                if all(statuses.get(p['id']) == 'success' for p in pages):
+                if self.root is not None:
+                    report('preparing_pdf')
+                    tickets = prepare_ticket_pdfs(self.store, document_id, self.folder.parent / 'output', allow_partial=True)
+                    matched_order_ids = {r['order_id'] for r in self.store.rows(select(db.associations.c.order_id)
+                        .select_from(db.associations.join(db.pages)).where(db.pages.c.document_id == document_id))}
+                    incomplete = not all(statuses.get(p['id']) == 'success' for p in pages) or len(tickets) < len(matched_order_ids)
+                    if incomplete:
+                        self.flag_scan(archive, pages, statuses)
+                    self.progress.update('needs_attention' if incomplete else 'ready', ready_tickets=tickets,
+                        message=f'{len(tickets)} complete orders ready. Incomplete or unidentified pages need review.' if incomplete else 'All detected orders are ready.')
+                elif all(statuses.get(p['id']) == 'success' for p in pages):
                     report('preparing_pdf')
                     tickets = prepare_ticket_pdfs(self.store, document_id, self.folder.parent / 'output')
                     self.progress.update('ready', ready_tickets=tickets, message='OCR matched and ticket PDFs are ready.')
                 else:
+                    self.flag_scan(archive, pages, statuses)
                     self.progress.update('needs_attention', message='Some pages are unreadable, unmatched, or incomplete. PDF not ready.')
                 self.finished[path.name] = signature
             except Exception as exc:
                 # Never log provider text, credentials, or ticket contents.
+                try:
+                    self.flag_scan(path, pages, statuses)
+                except OSError:
+                    LOG.warning('Unable to save the flagged scan report')
                 self.progress.update('error', failed_at=self.progress.snapshot()['phase'], message=f'Processing stopped ({type(exc).__name__}). PDF not ready.')
                 LOG.warning('Intake stopped a file attempt: %s', type(exc).__name__)
                 self.finished[path.name] = signature
 
 
+    def flag_scan(self, source, pages, statuses):
+        """Preserve a scan needing review with machine-readable page outcomes."""
+        folder = self.folder.parent / 'flag_order'
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / Path(source).name
+        shutil.copyfile(source, target)
+        target.with_suffix('.json').write_text(json.dumps({
+            'file': target.name,
+            'pages': [{'page': p['page_number'], 'status': statuses.get(p['id'], 'unprocessed')}
+                      for p in pages],
+            'message': 'Review unmatched pages, OCR errors, or missing expected pages.',
+        }, indent=2) + '\n')
+
+
 def known_demo_hashes(root):
     hashes = set()
-    paths = [Path(root) / 'demo_data/manifest.json', *Path(root).glob('demo_batches/*/manifest.json')]
+    paths = [Path(root) / 'demo_data/manifest.json', *Path(root).glob('demo_batches/*/manifest.json'), Path(root) / 'Scans/manifest.json']
     for manifest in paths:
         data = json.loads(manifest.read_text()) if manifest.exists() else {}
         if data.get('synthetic') is not True or data.get('generator') != 'ocr-synthetic-demo-v1':
             continue
+        hashes.update(value for value in data.get('legacy_allowed_hashes', []) if isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value))
         for ticket in data['tickets']:
             pdf = (manifest.parent / ticket['pdf']).resolve()
             if pdf.is_relative_to(manifest.parent.resolve()):
-                if pdf.is_file():
-                    hashes.add(checksum(pdf))
-                elif isinstance(ticket.get('pdf_sha256'), str) and len(ticket['pdf_sha256']) == 64:
-                    hashes.add(ticket['pdf_sha256'])
+                # Trust the generator's recorded digest, never a replacement
+                # file's current bytes merely because its path is familiar.
+                digest = ticket.get('pdf_sha256')
+                if isinstance(digest, str) and len(digest) == 64 and all(c in '0123456789abcdef' for c in digest):
+                    hashes.add(digest)
     return hashes
 
 
@@ -203,7 +263,7 @@ def _acquire_worker_lock(lock, stop, progress):
     return False
 
 
-def watch(root, database, folder, stop, progress=None):
+def watch(root, database, folder, stop, progress=None, submissions=None):
     """Hold an OS lock for the worker lifetime, including all provider calls."""
     progress = progress or ProgressState()
     root, database = Path(root), Path(database)
@@ -212,7 +272,7 @@ def watch(root, database, folder, stop, progress=None):
     try:
         if not _acquire_worker_lock(lock, stop, progress):
             return
-        progress.update('waiting', message='Waiting for a PDF in Scans/incoming.')
+        progress.update('waiting', message='Waiting for a PDF upload.')
         from dotenv import dotenv_values
         values = dotenv_values(root / '.env')
         for key in ('AZURE_DOC_INTEL_ENDPOINT', 'AZURE_DOC_INTEL_KEY'):
@@ -226,9 +286,18 @@ def watch(root, database, folder, stop, progress=None):
         try:
             allowed = known_demo_hashes(root) | {row['sha256'] for row in store.rows(select(db.documents).where(db.documents.c.synthetic.is_(True)))}
             worker = IntakeWatcher(store, folder, allowed, stop=stop, progress=progress, root=root)
+            if submissions is None:
+                raise ValueError('An upload submission queue is required')
             while not stop.is_set():
-                worker.tick()
-                stop.wait(2)
+                submitted = submissions.get()
+                if submitted is None:
+                    break
+                try:
+                    worker.tick(submitted=submitted)
+                finally:
+                    if Path(submitted).name in worker.finished:
+                        Path(submitted).with_suffix('.pdf.queued').unlink(missing_ok=True)
+                    submissions.task_done()
         finally:
             store.close()
     except OSError:

@@ -53,7 +53,7 @@ The database role must be allowed to create the `staging`, `core`, and `ops` sch
 
 SQLite maps these logical schemas into one local namespace, while retaining the same table/constraint model. Primary and foreign keys enforce relationships. Uniqueness covers source checksums, source-system/order numbers, source-system/shipment numbers, document checksums, document/page pairs, and association methods. Check constraints restrict statuses and require positive page numbers/counts. SQLite foreign keys are enabled explicitly.
 
-`ADK_Agentic/storage.py` is the canonical initial migration model. `database/001_initial.sql` is a generated PostgreSQL DDL reference; regenerate it with `python3 scripts/export_schema.py`. The application records schema version 1 once. Future changes require a new explicit migration; changing the model alone does not upgrade an existing database.
+`ADK_Agentic/storage.py` defines the schema and versioned startup migrations. Migration 2 adds manual page approvals; migration 3 adds rental orders, their child tickets and identified pages, and permits multiple tickets to share a shipment. Migration 4 retains local extraction for every page independently of its match status. Migration 5 adds version-specific download receipts. Existing pages, attempts and approvals survive upgrades. The numbered SQL files in `database/` describe the PostgreSQL changes. Run `python3 scripts/export_schema.py` to export a current schema snapshot to `database/current_schema.sql`; it does not rewrite historical migrations.
 
 ## ETL behavior
 

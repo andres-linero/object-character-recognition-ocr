@@ -1,111 +1,162 @@
-# Optical Character Recognition (OCR)
+# OCR Workspace
 
-A document operations workspace for tracking work orders, delivery details, ticket pages, and Azure OCR verification. A custom web UI talks to a FastAPI backend over the relational data pipeline.
+Upload a shuffled PDF containing several rental orders. The workspace reads its pages, groups work orders and shipments under the correct rental order (RO), identifies missing or conflicting pages, and compiles complete work orders for download.
 
-[See the workflow clips](#video-clips) for scan intake and incremental indexing.
+The tracker starts empty. Uploaded documents create its rows; Excel files and sample manifests do not supply order data.
 
-## Run the product UI
+## Start locally
 
-The local synthetic workspace needs no API key to browse existing records. From an activated Python environment:
-
-```sh
-python3 -m pip install -r requirements.txt
-# Only if generated datasets are not already present:
-python3 scripts/create_demo_data.py --count 100 --seed 42 --output demo_data
-python3 scripts/prepare_workspace.py
-sh scripts/run_web.sh
-```
-
-Open **http://127.0.0.1:8700**. The tabs are Overview, Dataset (tracker records), Documents, OCR activity, Review queue, and Ingestion history. There is one live workspace, with no test-stage dropdown. Source records do not become scanned files until a PDF is placed into intake.
-
-Drag a generated demo PDF onto **Drop a PDF to start OCR**, use **Choose PDF**, or place it directly in **`Scans/incoming/`**. Browser uploads are limited to 50 MB and use the same watched-folder workflow. While the server is running, its background worker waits for the copy to stabilize, preserves a source snapshot, and invokes Azure OCR for each unattempted page. Configure `AZURE_DOC_INTEL_ENDPOINT` and `AZURE_DOC_INTEL_KEY` in your local `.env` first; processing incurs provider charges. The view refreshes every five seconds. The local unauthenticated demo accepts PDFs matching the generated fixture manifests; unknown files are skipped rather than labeled synthetic.
-
-The three new sample PDFs wait outside intake at **`demo_batches/intake_test_03/ready_to_scan/`**. Move or copy one into `Scans/incoming/` to test automatic detection. Earlier test databases remain local archives and are not exposed as separate workspaces.
-
-The Dataset tab shows tracker records. Source PDF file counts, actual OCR page results, previews and ticket-only downloads remain separate from that record count. Company and jobsite are resolved from the tracker after OCR identifies the order. See the [product UI guide](docs/product-ui.md).
-
-## Legacy signed-in interface
-
-The original Streamlit interface remains available for compatibility. Its dependencies and Microsoft sign-in settings are separate from the new local product UI.
-
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt -r requirements-dev.txt
-cp .env.example .env
-python scripts/create_sample_data.py
-# Fill .env with your own Azure and Entra settings.
-streamlit run ADK_Agentic/streamlit_app.py
-```
-
-Register `http://localhost:8501` as a web redirect URI in Entra, create a client secret, and supply the tenant ID, client ID, and secret. Authentication remains mandatory in the live app. The separate synthetic preview requires no sign-in. Key Vault is optional and requires `AZURE_KEY_VAULT_URL` plus appropriate Azure identity access.
-
-The sample script generates a fictional workbook and PDF. Replace `EXCEL_PATH` and place your own ticket PDFs in `Scans/incoming_scans/` when ready. Workbook columns include `Order_ID`, `SO`, `Customer_name`, `Ship_to`, and `Status`; monthly sheets are combined. Optional tracker columns enable additional dashboard views.
-
-## Live OCR validation
-
-The two new synthetic batches passed live Azure verification: **120/120 pages matched their expected shipment IDs**, across 20 tickets, with no mismatches or provider errors. See the [method, evidence, and limitations](docs/ocr-validation-results.md).
-
-## Full demo dataset
-
-Generate 100 fictional ticket packets with 6, 9, or 12 pages each, including equipment, demo terms, and acknowledgement papers:
-
-```sh
-python scripts/create_demo_data.py --count 100 --seed 42 --output demo_data
-```
-
-The generator produces scanned-style PDFs, a matching Excel/CSV tracker, and a reproducibility manifest. It uses entirely fictional data, leaves the reference PDF untouched, and makes no Azure calls. See the [demo-data guide](docs/demo-data.md) for options and dashboard setup.
-
-## Data and privacy
-
-The default OCR crop sends the top-right half of the top quarter of each page to Azure. A geometric crop cannot guarantee that personal information is absent: inspect your document layout first. The OCR utility also exposes an uncropped option. Local workbooks, PDFs, caches, outputs, credentials, and virtual environments are excluded from Git. Use trusted local cache files only: the Excel cache uses Python pickle.
-
-The product UI is a localhost synthetic-data workspace. The legacy interface retains Microsoft sign-in. Production private-data access is outside the new UI's current scope. Azure processing is invoked separately and can incur charges.
-
-## Dependencies and checks
-
-`pyproject.toml` and `uv.lock` define the reproducible Python environment (Python 3.12–3.13). The requirement files remain compatible convenience entrypoints; CI uses the lock. Frontend development dependencies are locked in `web/package-lock.json`.
+Use Python 3.12 or 3.13. Raster scan extraction currently requires macOS Vision and the Swift command-line tools. Azure Document Intelligence reads the identifier crop.
 
 ```sh
 uv sync --locked --all-groups
+# Create .env only if it does not already exist:
+test -f .env || cp .env.example .env
+```
+
+Set these values in `.env` before uploading:
+
+```dotenv
+AZURE_DOC_INTEL_ENDPOINT=https://YOUR-RESOURCE.cognitiveservices.azure.com/
+AZURE_DOC_INTEL_KEY=YOUR-KEY
+```
+
+Prepare the workspace and current samples, then start the app:
+
+```sh
+uv run --locked python scripts/prepare_workspace.py
+uv run --locked python scripts/create_rental_hierarchy_sample.py --all-batches
+sh scripts/run_web.sh
+```
+
+Open **http://127.0.0.1:8700/#/overview**. Initialization upgrades existing data without clearing it. Generating samples replaces only named sample templates and backs up their previous versions. Uploaded originals, orders, reviews and download history stay intact.
+
+Processing an uploaded PDF makes Azure calls and can incur charges. Creating samples and browsing existing results make no Azure calls. The current local app accepts generated synthetic PDFs whose checksums are allowed by the manifest.
+
+## Order structure
+
+The document layout and review workflow follow this reading order:
+
+```text
+RO — rental order / rental agreement
+  Order number (OD)
+  Shipment number (SO)
+  Customer
+  Address and delivery location
+  Document type, copy and printed page X/Y
+```
+
+A customer can have several ROs. Each RO can group several OD orders and SO shipments, and multiple orders can share a shipment. The current tickets print only these three identifier types: OD, RO and SO. **A shipment number is not a customer order or work-order number.** Rental agreement and rental order are the same RO field; older `RA-…` labels normalize to `RO-…` while the original page reading is retained.
+
+## Try the current dataset
+
+Choose a PDF from `Scans/incomming_scan/` and drop it onto Overview or OCR activity, or use **Choose PDF**. The spelling `incomming_scan` is intentional for workspace compatibility.
+
+| Files | Contents |
+| --- | --- |
+| `batch_01_8_orders.pdf` through `batch_08_8_orders.pdf` | Eight PDFs, each containing 2 ROs, 8 OD orders, 4 shared SO shipments and all 48 shuffled pages. |
+| `rental_orders_RO_OD_SO_shuffled.pdf` | An identical alias of batch 1. Uploading both does not duplicate its pages. |
+
+Across the eight batches there are **64 work orders under 16 ROs and 32 shipments**. Each work order expects six printed pages. Every batch includes:
+
+| Case | Expected result | Action |
+| --- | --- | --- |
+| Six orders with normally positioned identifiers | Approved and ready for download | Download their compiled PDFs or scan ZIP. |
+| One order with the OD line on printed page 1 below the OCR zone | All six images exist, but page 1 needs review | Inspect the visible OD, RO, SO and customer/address in Flags and link the image. |
+| One order with the OD line on printed page 6 below the OCR zone | All six images exist, but page 6 needs review | Inspect and approve the correct original image. |
+
+No page or identifier is deleted or replaced with a fake number. The fixed crop cannot read the shifted OD, while local full-page extraction retains it for review. A readable RO or SO alone does not automatically verify an OD page. Across eight batches, 384 pages are present: 48 orders should complete automatically and 16 need one page reviewed. These are expected results, not preloaded statuses; actual provider readings determine the outcome.
+
+Generating samples does not submit them or preload rows. Previously uploaded legacy batches retain their original identifiers and test cases; refreshing templates does not rewrite that history.
+
+## Use the workspace
+
+| Tab | Purpose |
+| --- | --- |
+| **Overview** | Upload PDFs and see flat Approved / In review order rows, with downloads for approved orders. |
+| **Dataset** | Search the document-derived tracker by RO, work order, shipment, customer or address. Check completeness and download marks. |
+| **OCR activity** | Follow the current PDF's actual page total and processing progress. Download its completed work orders together. |
+| **Flags** | Inspect incomplete orders, unmatched images and field conflicts; repair assignments or upload missing pages. |
+| **Ingestion history** | See document-processing runs. |
+
+### Review and repair
+
+Open an incomplete work order in Flags and choose **Fix pages**. The target RO, work order, shipment, customer and address identify what you are completing.
+
+- **Possible matches** are unassigned images without a known conflicting order or page field. They still require your review.
+- **Different images** have conflicting customer, address, RO, work-order or printed-page details. They remain available for inspection and for their correct order; they are not deleted or marked complete.
+- **No matching image** means available images cannot fill the selected printed slot. Upload the missing page instead of linking an unrelated image.
+
+Selecting an image changes its preview and comparison only, preserving the tab, scroll and keyboard focus. The comparison separates target values from image values. Known identity/page conflicts block linking on the server and in the UI. Shipment differences or unreadable identity require explicit acknowledgment after inspection.
+
+The link action names both source image and destination work order/page. A separate approval record preserves the decision without changing the source PDF or original OCR result. An order becomes ready only when every expected printed page is accounted for without duplicates. One complete order can be downloaded while others still need attention.
+
+### Download once
+
+Before downloading the scan ZIP, its card shows orders detected in this scan, ready orders, orders not ready, and printed pages still unresolved. Only ready orders enter the ZIP. Counts update after repairs and exclude older scans; saved scan results remain available after restarting the app.
+
+PDF and ZIP downloads mark included work orders **Downloaded**. The mark persists after refresh or restart, with a separate **Download again** action. Inline previews do not count. Changed source pages create a new downloadable version; earlier receipts remain in history. A receipt records a file served by the app, not confirmation that a browser saved it to disk.
+
+## Processing pipeline
+
+```mermaid
+flowchart LR
+    A[PDF upload] --> B[Durable queue and immutable original]
+    B --> C[Local customer, address and page extraction]
+    B --> D[Azure identifier crop]
+    C --> E[RO, work order and shipment grouping]
+    D --> E
+    E --> F[Printed-page completeness checks]
+    F --> G[Flags and manual review]
+    F --> H[Compiled PDFs and ZIP downloads]
+    G --> F
+```
+
+Uploads are limited to 50 MB per PDF. A completed upload triggers processing immediately; there is no two-second folder polling. Durable queue markers recover pending submissions after restart. Copying a sample into the folder does not submit it.
+
+Each previously unattempted page makes one Azure request. The parser retains RO, TK/work-order, shipment and customer-order namespaces separately from that response. OD must be read from the provider crop and agree with local evidence before a new OD page passes. Full-page customer/address extraction stays local. Unmatched pages retain their extracted fields. Failed provider attempts remain visible and are not silently retried.
+
+## Files and persistence
+
+| Path | Purpose |
+| --- | --- |
+| `Scans/incomming_scan/` | Selectable samples and incoming uploads. |
+| `Scans/processed/<sha256>/` | Preserved original uploads referenced by database pages. |
+| `Scans/flag_order/` | Copies and page-status reports for scans needing attention. |
+| `Scans/output/` | Checked, compiled ticket PDFs. |
+| `Scans/manifest.json` | Synthetic-file allowlist and sample case descriptions; not the source of tracker rows. |
+| `demo_runtime/workspace.sqlite` | Orders, pages, attempts, RO links, manual approvals and versioned download receipts. |
+
+`ADK_Agentic/storage.py` owns the schema and startup migrations. PostgreSQL migration references are in `database/`; the local app uses SQLite. Generated data, source documents, runtime databases and credentials are excluded from Git.
+
+For older registered scans, `scripts/extract_page_details.py` adds local details and `scripts/link_existing_rental_numbers.py` links printed agreement labels to the RO field. Neither makes Azure calls or reassigns pages. `scripts/rebuild_scan_dataset.py` is an explicit destructive reset tool, not part of normal startup or sample refresh.
+
+## Checks and contribution workflow
+
+Work on a feature branch. Before requesting review:
+
+```sh
 uv run --locked ruff check ADK_Agentic scripts tests
 uv run --locked pytest -q
-uv run --locked pre-commit install
 cd web
 npm ci
+npm run check
 npm test
 ```
 
-Pull requests run Ubuntu tests with PostgreSQL 17, Windows tests including the real shared-read API, frontend DOM tests, lint, and a redacted Gitleaks history scan. Dependabot proposes Python, npm, and Actions updates. Deployments remain manual: there is no configured production target or automatic CD. Merge through reviewed feature branches.
+Tests use generated PDFs and mocked Azure responses. UI tests cover uploads, stable selection, comparisons, missing-page recovery and download marks. Optional PostgreSQL tests require a disposable `TEST_DATABASE_URL`. Tests do not establish live Azure connectivity or production readiness.
 
-Tests mock Azure OCR; they do not prove live sign-in or Azure connectivity. See the [current audit and remaining work](docs/audit-hardening.md). `PRP.md` preserves the initial public-copy audit.
+## Current scope and documentation
 
-## Architecture and documentation
+This is a localhost synthetic-document workspace. Raster extraction uses macOS Vision; unfamiliar layouts need field mappings and validation. Production authentication, unrestricted private-document ingestion and distributed worker coordination are outside the current product UI.
 
-The primary interface is a static HTML/CSS/JavaScript client served by FastAPI. Its API reads the SQL order/page model and keeps expected associations separate from actual OCR evidence. Azure processing and tracker ETL are explicit backend operations. See the [product architecture](docs/product-ui.md) and [data flow](docs/architecture.md).
+The Azure crop is the right half of the top quarter of each page. Keep customer details and signatures outside it when changing templates; the current samples do so. Signature status reports printed evidence or PDF fields and does not authenticate signatures.
 
-Start with the [documentation guide](docs/README.md), then use the [configuration reference](docs/configuration.md), [operations guide](docs/operations.md), and [proposed architecture decision](docs/decisions/0001-modular-monolith.md). The guides identify implemented features and remaining migration work.
+- [Product UI and operations](docs/product-ui.md)
+- [Data pipeline and migrations](docs/data-pipeline.md)
+- [Configuration reference](docs/configuration.md)
+- [Architecture](docs/architecture.md)
+- [Legacy walkthroughs](docs/walkthroughs.md)
+- [Historical Azure validation evidence](docs/ocr-validation-results.md)
 
-Use the [Google Doc architecture workspace](https://docs.google.com/document/d/19lhy8-3sdm3E9ZSVoxvQ6Cty-0Tm62eW5EJPxWn24YQ/edit?usp=drivesdk) for design discussion. Versioned repository guides remain the source of truth; synchronization is manual. The document retains its existing Drive access settings.
-
-## Video clips
-
-Short, silent clips from the supplied recordings demonstrate scan intake and incremental indexing. These recordings predate the public copy; they show workflow behavior, not current performance benchmarks.
-
-### Scan intake
-
-Place scanned PDFs in the incoming scans directory. The app checks for new or changed PDFs during dashboard reruns.
-
-![Scan intake: navigating the incoming PDF folder](docs/media/scan-intake.gif)
-
-[Open scan-intake clip](docs/media/scan-intake.gif) · 11 seconds · account sidebar and desktop cropped out.
-
-### Incremental indexing
-
-Unchanged PDFs reuse their cached associations. New or changed PDFs trigger OCR; the log reports cache hits and the work that remains.
-
-![Incremental indexing: cache hits and changed-PDF detection](docs/media/incremental-indexing.gif)
-
-[Open indexing clip](docs/media/incremental-indexing.gif) · 18 seconds · operational identifiers and filenames concealed.
-
-Both clips are silent animated GIFs that play directly in the README. The original videos remain local. See [clip provenance and editing notes](docs/walkthroughs.md).
+The legacy Streamlit interface and workbook generators are separate compatibility tools. Their older recordings and validation results do not describe the current document-driven OD/RO/SO workflow.

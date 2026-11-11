@@ -8,9 +8,13 @@ import os
 import re
 import logging
 from io import BytesIO
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 from typing import Optional
+try:
+    from .page_review import canonical_rental_number
+except ImportError:
+    from page_review import canonical_rental_number
 
 from PIL import Image
 
@@ -62,8 +66,9 @@ def _crop_header(image_bytes: bytes, height_ratio: float = HEADER_CROP_HEIGHT, w
 
 @dataclass(frozen=True)
 class ParsedIdentifier:
-    kind: Literal["shipment", "work_order"]
+    kind: Literal["shipment", "work_order", "rental_order", "customer_order"]
     value: str
+    identifiers: dict = field(default_factory=dict, compare=False)
 
 
 def extract_order_number(image_bytes: bytes, crop_header: bool = True,
@@ -111,7 +116,32 @@ def extract_order_identity(
     return parse_identifier(raw_text)
 
 
+def parse_document_identifiers(raw_text: str) -> dict:
+    """Read all labeled namespaces from one provider response, never conflating SO and order."""
+    text = re.sub(r'\s+', ' ', raw_text).strip()
+    patterns = {
+        'rental_order': r'\b(?:Rental\s*(?:Order|Agreement)?|Order)\s*(?:No\.?|Number|#)\s*[:#]?\s*((?:RO|RA)-\d+)\b',
+        'work_order': r'\b(?:(?:Work\s*Order|(?:Delivery\s*)?Ticket)\s*(?:No\.?|Number|#)?\s*[:#]?\s*((?:W-|TK-|OD-)?\d{4,12})|Order\s*(?:No\.?|Number|#)\s*[:#]?\s*(OD-\d{4,12}))\b',
+        'shipment': r'\b(?:Shipment\s*(?:No\.?|Number|#|Nbr)|Ship\s*(?:No\.?|Number|#)|Sale\s*(?:No\.?|Number|#)|SO\s*[:#]?|S/O)\s*[.:#]?\s*(?:SO-)?(\d{4,8})(?!\d)',
+        'customer_order': r'(?<!Work )(?<!Rental )\b(?:Customer\s+|Purchase\s+)?Order\s*(?:No\.?|Number|#)\s*[:#]?\s*((?:CO-|PO-)?\d{4,12})\b',
+    }
+    values = {}
+    for kind, pattern in patterns.items():
+        match = re.search(pattern, text, re.I)
+        if match:
+            value = next(group for group in match.groups() if group is not None).upper()
+            if kind == 'rental_order':
+                value = canonical_rental_number(value)
+            values[kind] = (value.lstrip('0') or '0') if value.isdigit() else value
+    return values
+
+
 def parse_identifier(raw_text: str) -> Optional[ParsedIdentifier]:
+    primary = _parse_primary_identifier(raw_text)
+    return ParsedIdentifier(primary.kind, primary.value, parse_document_identifiers(raw_text)) if primary else None
+
+
+def _parse_primary_identifier(raw_text: str) -> Optional[ParsedIdentifier]:
     """Parse provider text without cloud calls, retaining its identifier namespace."""
     # Aggressive normalization: collapse ALL whitespace (newlines, tabs,
     # double spaces) into single spaces. Azure often splits "Shipment" and
@@ -132,12 +162,18 @@ def parse_identifier(raw_text: str) -> Optional[ParsedIdentifier]:
         "shipment confirmation", "shipment",
         "sale no", "shipment no", "order no",
         "work order",
+        "ticket no", "customer order", "rental order",
     ]
     is_ticket = any(kw in text_lower for kw in ticket_keywords)
 
     if not is_ticket:
         logger.warning("OCR: page rejected — no ticket keyword found")
         return None
+
+    # OD is the order namespace; RO and SO are separate grouping references.
+    order = parse_document_identifiers(all_text).get('work_order')
+    if order and order.startswith('OD-'):
+        return ParsedIdentifier('work_order', order)
 
     # Build a broad label-alternatives group so variants like "Shipment No",
     # "Shipment Number", "Shipment #", "Sale No.", "Ship No", "SO#", "SO:"
@@ -151,30 +187,38 @@ def parse_identifier(raw_text: str) -> Optional[ParsedIdentifier]:
         r"|S/O\s*[#:]?"                            # S/O legacy format
     )
 
+    # A rental order is the parent of multiple tickets/work orders and shipments.
+    rental = re.search(r'\b(?:Rental\s*(?:Order|Agreement)?|Order)\s*(?:No\.?|Number|#)\s*[:#]?\s*((?:RO|RA)-\d+)\b', all_text, re.I)
+    if rental:
+        return ParsedIdentifier('rental_order', canonical_rental_number(rental.group(1)))
+
     # 1. Shipment/Sale number from labeled fields (highest priority for SO documents)
     #    Must check BEFORE W- pattern since shipment docs may have unrelated W- refs.
     #    \d{4,8} — real shipment numbers are at least 4 digits. The old
     #    \d{3,8} let 3-digit page fragments like "837" win over the
     #    actual 5-digit shipment number on the same page.
     label_match = re.search(
-        rf"\b(?:{LABEL_ALTS})\s*[.:#]?\s*0*(\d{{4,8}})(?!\d)",
+        rf"\b(?:{LABEL_ALTS})\s*[.:#]?\s*(?:SO-)?0*(\d{{4,8}})(?!\d)",
         all_text, re.IGNORECASE
     )
     if label_match:
         return ParsedIdentifier("shipment", label_match.group(1))
 
     # 2. Work Order ID pattern: W-XXXXXX
-    match = re.search(r'\bW-\d+\b', all_text, re.IGNORECASE)
+    match = re.search(r'\b(?:W|TK)-\d+\b', all_text, re.IGNORECASE)
     if match:
         return ParsedIdentifier("work_order", match.group(0).upper())
 
     # 3. Order No. as fallback (separate from shipment to avoid false matches)
     order_match = re.search(
-        r'(?:Order\s*(?:No|Number|#)\s*\.?|Work\s*Order\s*(?:No|Number|#)\s*\.?)\s*[.:#]?\s*0*(\d{4,8})',
+        r'Work\s*Order\s*(?:No|Number|#)\s*\.?\s*[.:#]?\s*0*(\d{4,8})(?!\d)',
         all_text, re.IGNORECASE
     )
     if order_match:
         return ParsedIdentifier("work_order", order_match.group(1))
+    customer_order = parse_document_identifiers(all_text).get('customer_order')
+    if customer_order:
+        return ParsedIdentifier('customer_order', customer_order)
 
     # 4. Shipment Confirmation with number before or after title
     #    OCR sometimes reads the number out of order (e.g. "Confirmation 003452 Shipment No")

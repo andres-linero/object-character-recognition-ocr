@@ -11,7 +11,8 @@ from ADK_Agentic.intake_watcher import IntakeWatcher
 from scripts.create_demo_data import generate_dataset
 
 
-def test_watched_folder_ignores_outside_samples_then_reads_each_page_once(tmp_path):
+@pytest.mark.parametrize('upload_triggered', [False, True])
+def test_watched_folder_ignores_outside_samples_then_reads_each_page_once(tmp_path, upload_triggered):
     outside = tmp_path / 'ready_to_scan'
     manifest = generate_dataset(outside, count=1, min_pages=6, max_pages=6, rasterize=False)
     pdf = outside / manifest['tickets'][0]['pdf']
@@ -22,15 +23,21 @@ def test_watched_folder_ignores_outside_samples_then_reads_each_page_once(tmp_pa
         ingest_tracker(store, outside / 'orders.xlsx', 'demo', synthetic=True)
         calls = []
         def extract(*args, **kwargs):
+            if upload_triggered:
+                assert worker.progress.snapshot()['total'] == 6
+                assert worker.progress.snapshot()['completed'] == len(calls)
             calls.append(1)
             return manifest['tickets'][0]['shipment']
         worker = IntakeWatcher(store, folder, {checksum(pdf)}, extract)
         worker.tick()
         assert store.counts()['documents'] == 0
         shutil.copy2(pdf, folder / 'new_scan.PDF')
-        worker.tick()
-        assert not calls  # file must be observed stable twice
-        worker.tick()
+        if upload_triggered:
+            worker.tick(submitted=folder / 'new_scan.PDF')
+        else:
+            worker.tick()
+            assert not calls  # file must be observed stable twice
+            worker.tick()
         assert len(calls) == 6
         assert worker.progress.snapshot()['phase'] == 'ready'
         assert worker.progress.snapshot()['matched'] == worker.progress.snapshot()['total'] == 6
@@ -90,6 +97,8 @@ def test_progress_cannot_announce_ready_for_unmatched_pages_or_failed_pdf(tmp_pa
         result = worker.progress.snapshot()
         assert result['phase'] == ('needs_attention' if failure == 'no_match' else 'error')
         assert result['ready_tickets'] == []
+        assert (tmp_path / 'flag_order/new.pdf').is_file()
+        assert (tmp_path / 'flag_order/new.json').is_file()
         if failure == 'pdf_error':
             assert result['failed_at'] == 'preparing_pdf'
     finally:
@@ -106,6 +115,19 @@ def test_generated_manifest_recognizes_sample_moved_before_app_starts(tmp_path):
     incoming.mkdir(parents=True)
     shutil.move(sample, incoming / sample.name)
     assert digest in known_demo_hashes(tmp_path)
+
+
+def test_replacing_sample_file_does_not_expand_the_recorded_allowlist(tmp_path):
+    from ADK_Agentic.intake_watcher import known_demo_hashes
+    dataset = tmp_path / 'demo_data'
+    manifest = generate_dataset(dataset, count=1, min_pages=6, max_pages=6, rasterize=False)
+    sample = dataset / manifest['tickets'][0]['pdf']
+    original = checksum(sample)
+    with sample.open('ab') as modified:
+        modified.write(b'\n% changed after generation\n')
+    hashes = known_demo_hashes(tmp_path)
+    assert checksum(sample) not in hashes
+    assert original in hashes
 
 
 def test_worker_waits_for_old_live_connection_to_release_lock(tmp_path, monkeypatch):

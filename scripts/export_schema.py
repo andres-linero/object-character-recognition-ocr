@@ -1,4 +1,5 @@
-"""Export the initial PostgreSQL DDL from the canonical SQLAlchemy model."""
+"""Export a current PostgreSQL DDL snapshot without rewriting past migrations."""
+import argparse
 from pathlib import Path
 import sys
 from sqlalchemy import create_mock_engine
@@ -10,6 +11,8 @@ statements.extend(f"CREATE SCHEMA IF NOT EXISTS {name};" for name in ("staging",
 engine = create_mock_engine("postgresql+psycopg://", lambda sql, *a, **kw: statements.append(str(sql.compile(dialect=engine.dialect)).strip() + ";"))
 metadata.create_all(engine, checkfirst=False)
 if __name__ == "__main__":
-    target = Path(__file__).resolve().parents[1] / "database/001_initial.sql"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parents[1] / 'database/current_schema.sql')
+    target = parser.parse_args().output
     target.write_text("\n".join(line.rstrip() for line in "\n\n".join(statements).splitlines()) + "\n")
     print(target)

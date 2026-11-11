@@ -32,6 +32,7 @@ PAGE_WIDTH, PAGE_HEIGHT = 612, 792
 TRACKER_COLUMNS = (
     "Order_ID", "SO", "Customer_name", "Ship_to", "Status", "Today",
     "Deadline", "Deadline Status", "Requested by", "Expected_Pages", "Order_Type",
+    "Rental_Order", "Address",
 )
 INK = (0.12, 0.17, 0.24)
 MUTED = (0.35, 0.39, 0.45)
@@ -66,13 +67,18 @@ class Ticket:
     status: str
     page_count: int
     items: tuple[Item, ...]
+    parent_rental_number: str | None = None
+
+    @property
+    def rental_order(self) -> str:
+        return self.parent_rental_number or f"RA-{int(self.order_id.split('-')[-1]) - 290000}"
 
     def tracker_row(self) -> dict:
         return dict(zip(TRACKER_COLUMNS, (
             self.order_id, self.shipment, self.customer, self.destination,
             self.status, self.order_date, self.deadline,
             "Complete" if self.status == "COMPLETE" else "On schedule",
-            self.dispatcher, self.page_count, "RENTAL",
+            self.dispatcher, self.page_count, "RENTAL", self.rental_order, self.address,
         )))
 
 
@@ -135,19 +141,37 @@ def _box(page, rect, title: str, lines: Sequence[str]):
 
 
 def _draw_page(page, ticket: Ticket, kind: str, copy_number: int, copy_count: int,
-               page_number: int):
+               page_number: int, order_offset: float = 0):
     page.draw_rect(page.rect, fill=COPY_COLORS[copy_number - 1], color=None)
     # Only identifiers and document labels occupy the application's OCR crop.
-    _text(page, 36, 39, "NORTHSTAR DEMO EQUIPMENT", 15, True, BLUE)
+    _text(page, 36, 39, "NORTHSTAR EQUIPMENT" if ticket.parent_rental_number else "NORTHSTAR DEMO EQUIPMENT", 15, True, BLUE)
     _text(page, 36, 58, "Fictional rental and delivery operations", 9, color=MUTED)
     page.draw_rect(fitz.Rect(322, 24, 576, 166), fill=PALE, color=None)
-    _text(page, 334, 47, "Delivery Ticket / Shipment", 11, True)
-    _text(page, 334, 70, f"Shipment No. {ticket.shipment}", 16, True, BLUE)
-    _text(page, 334, 91, f"Work Order No. {ticket.order_id}", 10)
-    _text(page, 334, 111, kind, 10, True)
-    _text(page, 334, 131, f"{COPY_NAMES[copy_number - 1]} copy {copy_number}/{copy_count} | Page {page_number}/{ticket.page_count}", 9)
-    _text(page, 334, 150, "SYNTHETIC DEMO - NOT A REAL ORDER", 8, True, MUTED)
-    page.draw_line((36, 185), (576, 185), color=BLUE, width=1.2)
+    if ticket.order_id.startswith('OD-'):
+        # Keep all personal and commercial detail below the fixed Azure crop.
+        # A shifted order line remains readable in the original full-page image.
+        page.draw_rect(fitz.Rect(322, 24, 576, 196), fill=PALE, color=None)
+        _text(page, 334, 45, "RENTAL / DELIVERY RECORD", 9, True, BLUE)
+        _text(page, 334, 69, kind, 9, True)
+        _text(page, 334, 86, f"{COPY_NAMES[copy_number - 1]} copy | Page {page_number}/{ticket.page_count}", 9)
+        _text(page, 334, 126, f"Rental No. {ticket.parent_rental_number}", 13, True, BLUE)
+        _text(page, 334, 154 + order_offset, f"Order No. {ticket.order_id}", 13, True)
+        _text(page, 334, 182, f"Shipment No. SO-{ticket.shipment}", 12)
+    elif ticket.parent_rental_number:
+        _text(page, 334, 47, f"Rental Order No. {ticket.parent_rental_number}", 15, True, BLUE)
+        _text(page, 334, 70, f"Work Order / Ticket No. {ticket.order_id}", 11, True)
+        _text(page, 334, 91, f"Shipment No. {ticket.shipment}", 10)
+    else:
+        _text(page, 334, 47, "Delivery Ticket / Shipment", 11, True)
+        _text(page, 334, 70, f"Shipment No. {ticket.shipment}", 16, True, BLUE)
+        _text(page, 334, 91, f"Work Order No. {ticket.order_id}", 10)
+    if not ticket.parent_rental_number:
+        _text(page, 334, 111, f"Rental Agreement No. {ticket.rental_order}", 10, True)
+    if not ticket.order_id.startswith('OD-'):
+        _text(page, 334, 122, kind, 8, True)
+        _text(page, 334, 131, f"{COPY_NAMES[copy_number - 1]} copy {copy_number}/{copy_count} | Page {page_number}/{ticket.page_count}", 9)
+        _text(page, 334, 150, "SYNTHETIC DEMO - NOT A REAL ORDER", 8, True, MUTED)
+    page.draw_line((36, 185), (306 if ticket.order_id.startswith('OD-') else 576, 185), color=BLUE, width=1.2)
     _text(page, 36, 212, kind.upper(), 18, True, BLUE)
     _text(page, 36, 232, f"{COPY_NAMES[copy_number - 1]} copy - fictional training packet", 9, color=MUTED)
     _box(page, (36, 249, 300, 351), "CUSTOMER / BILL TO", [ticket.customer,
@@ -202,13 +226,20 @@ def _draw_page(page, ticket: Ticket, kind: str, copy_number: int, copy_count: in
             "Receiving: Demo Receiving Desk | Transport: Demo Fleet Desk",
             "NOT SIGNED - DEMO. No handwritten or personal signature is included."])
         _box(page, (36, 655, 576, 710), "DELIVERY RESULT", ["SIMULATED ACCEPTANCE ONLY - NOT PROOF OF DELIVERY"])
-    _text(page, 36, 720, "Acknowledgment: DEMO ONLY - no handwriting, signature, or personal identity.", 9)
+    if ticket.order_id.startswith('OD-'):
+        page.draw_line((36, 725), (305, 725), color=MUTED, width=.6)
+        page.draw_line((405, 725), (576, 725), color=MUTED, width=.6)
+        _text(page, 36, 738, "Received by / signature: NOT SIGNED", 8, color=MUTED)
+        _text(page, 405, 738, "Date: not signed", 8, color=MUTED)
+    else:
+        _text(page, 36, 720, "Acknowledgment: DEMO ONLY - no handwriting, signature, or personal identity.", 9)
     page.draw_line((36, 742), (576, 742), color=(0.72, 0.77, 0.82), width=0.6)
     _text(page, 36, 760, "SYNTHETIC DEMO DATA | All entities and transactions are fictional", 8, color=MUTED)
     _text(page, 496, 760, f"Page {page_number}/{ticket.page_count}", 8, color=MUTED)
 
 
-def write_ticket_pdf(path: Path, ticket: Ticket, rasterize: bool = True) -> list[dict]:
+def write_ticket_pdf(path: Path, ticket: Ticket, rasterize: bool = True,
+                     order_offsets=None) -> list[dict]:
     pages = []
     copy_count = ticket.page_count // 3
     with fitz.open() as pdf:
@@ -217,7 +248,8 @@ def write_ticket_pdf(path: Path, ticket: Ticket, rasterize: bool = True) -> list
             copy_number = index % copy_count + 1
             with fitz.open() as source:
                 page = source.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
-                _draw_page(page, ticket, kind, copy_number, copy_count, index + 1)
+                _draw_page(page, ticket, kind, copy_number, copy_count, index + 1,
+                           (order_offsets or {}).get(index + 1, 0))
                 if rasterize:
                     pixmap = page.get_pixmap(dpi=120, alpha=False)
                     target = pdf.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
@@ -316,7 +348,7 @@ def generate_dataset(output: Path, count: int = 100, seed: int = 42,
             record["items"] = list(record["items"])
             record["order_date"] = ticket.order_date.isoformat()
             record["deadline"] = ticket.deadline.isoformat()
-            record.update({"pdf": f"incoming_scans/{pdf_name}", "pages": pages,
+            record.update({"rental_order": ticket.rental_order, "pdf": f"incoming_scans/{pdf_name}", "pages": pages,
                            "pdf_sha256": hashlib.sha256((incoming / pdf_name).read_bytes()).hexdigest()})
             manifest_tickets.append(record)
         _write_tracker(staging / "orders.xlsx", tickets)

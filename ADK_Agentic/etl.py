@@ -35,9 +35,10 @@ def upsert(connection, table, keys, values):
         statement = statement.on_conflict_do_update(index_elements=keys, set_=updates)
     else:
         statement = statement.on_conflict_do_nothing(index_elements=keys)
-    value = connection.scalar(statement.returning(table.c.id))
+    identity_column = table.c.id if 'id' in table.c else list(table.primary_key.columns)[0]
+    value = connection.scalar(statement.returning(identity_column))
     if value is None:
-        query = select(table.c.id)
+        query = select(identity_column)
         for key in keys:
             query = query.where(table.c[key] == values[key])
         value = connection.scalar(query)
