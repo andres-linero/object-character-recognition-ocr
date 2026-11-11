@@ -27,7 +27,7 @@ def register_pdf(store, path, synthetic=False):
     return document_id
 
 
-def process_page(store, page_id, source_system="tracker", extractor=None):
+def process_page(store, page_id, source_system="tracker", extractor=None, on_stage=None):
     """Commit an attempt before calling the provider; retain failures for explicit retry."""
     from .ocr import ParsedIdentifier, extract_order_identity
     if extractor is None:
@@ -50,6 +50,8 @@ def process_page(store, page_id, source_system="tracker", extractor=None):
             crop = fitz.Rect(rect.width / 2, 0, rect.width, rect.height / 4)
             image = source.get_pixmap(dpi=200, clip=crop).tobytes("png")
         parsed = extractor(image, crop_header=False)
+        if on_stage:
+            on_stage("matching")
         if isinstance(parsed, ParsedIdentifier):
             identifier, kind = parsed.value, parsed.kind
         else:

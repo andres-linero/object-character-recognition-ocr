@@ -30,6 +30,14 @@ async function boot() {
     pretendToBeVisual: true,
   });
   const calls = [];
+  const progressStreams = [];
+  dom.window.EventSource = class {
+    constructor(url) {
+      this.url = url;
+      progressStreams.push(this);
+    }
+    close() {}
+  };
   dom.window.fetch = async (path, options = {}) => {
     calls.push({ path, options });
     let data;
@@ -89,9 +97,13 @@ async function boot() {
       };
     else if (url.pathname.endsWith("/activity"))
       data = {
+        files: 2,
+        files_read: 1,
         activity: [
           {
             id: "attempt-1",
+            page_id: "page-1",
+            matched_order: tickets[0],
             identifier: "900120",
             status: "success",
             page: 55,
@@ -128,55 +140,59 @@ async function boot() {
   };
   dom.window.eval(script);
   await wait(30);
-  return { dom, window: dom.window, document: dom.window.document, calls };
+  return {
+    dom,
+    window: dom.window,
+    document: dom.window.document,
+    calls,
+    progressStreams,
+  };
 }
 const findButton = (document, text) =>
   [...document.querySelectorAll("button")].find(
     (b) => b.textContent.trim() === text,
   );
-test("Order Tracker renders real response rows safely with readable columns and pagination", async () => {
+test("restored tabs count files and show dataset context without test-stage choices", async () => {
   const { dom, document } = await boot();
-  assert.equal(document.querySelector("h1").textContent, "Order Tracker");
+  assert.equal(document.querySelector("h1").textContent, "Scan intake");
+  assert.equal(document.querySelectorAll("#navigation button").length, 6);
   assert.deepEqual(
-    [...document.querySelectorAll("th")].map((e) => e.textContent),
-    [
-      "Work order",
-      "Customer & location",
-      "Address",
-      "Order status",
-      "OCR result",
-      "Due date",
-      "",
-    ],
+    [...document.querySelectorAll(".summary-value")].map((n) => n.textContent),
+    ["2", "1 / 2", "1"],
   );
-  assert.equal(document.querySelectorAll("tbody tr").length, 10);
+  assert.ok(document.querySelector('[aria-label="Dataset"]'));
+  assert.equal(document.querySelector(".dataset-control select"), null);
+  findButton(document, "Dataset").click();
+  await wait(25);
+  assert.ok(document.querySelector("tbody"));
+  findButton(document, "OCR activity").click();
+  await wait(25);
+  assert.equal(document.querySelector('option[value="flagged"]'), null);
+  assert.equal(document.querySelector(".scan-result-card script"), null);
   assert.match(
-    document.querySelector("tbody").textContent,
-    /<script>alert\(1\)<\/script>/,
-  );
-  assert.equal(document.querySelector("tbody script"), null);
-  findButton(document, "2").click();
-  assert.match(document.querySelector("tbody").textContent, /W-990110/);
-  assert.match(
-    document.querySelector(".table-footer").textContent,
-    /Showing 11–20 of 20/,
+    document.querySelector(".scan-result-card").textContent,
+    /Demo <script>alert/,
   );
   dom.window.close();
 });
-test("search and status filters request fresh API data rather than a static dataframe", async () => {
+test("the intake filters scan results without switching workflow screens", async () => {
   const { dom, document, calls } = await boot();
-  const input = document.querySelector("input[type=search]");
-  input.value = "900119";
-  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-  await wait(260);
-  assert.equal(document.querySelectorAll("tbody tr").length, 1);
-  assert.match(document.querySelector("tbody").textContent, /W-990119/);
-  assert(calls.some((call) => call.path.includes("q=900119")));
+  const filter = document.querySelector('[aria-label="Filter OCR results"]');
+  filter.value = "pending";
+  filter.dispatchEvent(new dom.window.Event("change"));
+  assert.equal(document.querySelectorAll(".scan-result-card").length, 0);
+  filter.value = "all";
+  filter.dispatchEvent(new dom.window.Event("change"));
+  assert.equal(document.querySelectorAll(".scan-result-card").length, 1);
+  findButton(document, "Refresh results").click();
+  await wait(25);
+  assert.ok(calls.filter((c) => c.path.endsWith("/activity")).length >= 2);
+  assert.equal(document.querySelector("h1").textContent, "Scan intake");
   dom.window.close();
 });
 test("ticket drawer exposes the selected order, page evidence, and a six-page download route", async () => {
   const { dom, document } = await boot();
-  document.querySelector("tbody tr").click();
+  findButton(document, "Open matched ticket").click();
   await wait(25);
   assert.equal(
     document.querySelector("[role=dialog] h2").textContent,
@@ -199,17 +215,108 @@ test("ticket drawer exposes the selected order, page evidence, and a six-page do
   assert.equal(document.querySelector("[role=dialog]"), null);
   dom.window.close();
 });
-test("left navigation switches between working document, OCR, and ingestion views", async () => {
+
+test("live worker events advance connected stages and expose downloads only on PDF readiness", async () => {
+  const { dom, document, progressStreams } = await boot();
+  const stream = progressStreams[0];
+  assert.match(stream.url, /progress\/stream$/);
+  stream.onmessage({
+    data: JSON.stringify({
+      phase: "reading",
+      file: "new_scan.pdf",
+      total: 6,
+      completed: 2,
+      matched: 2,
+      revision: 1,
+    }),
+  });
+  assert.equal(
+    document
+      .querySelector('[aria-label="OCR pages processed"]')
+      .getAttribute("aria-valuenow"),
+    "2",
+  );
+  assert.ok(document.querySelector(".ocr-live-step.is-active"));
+  assert.equal(document.querySelector(".ocr-ready-actions"), null);
+  stream.onmessage({
+    data: JSON.stringify({
+      phase: "ready",
+      file: "new_scan.pdf",
+      total: 6,
+      completed: 6,
+      matched: 6,
+      revision: 2,
+      ready_tickets: [{ id: "ticket-0", work_order: "W-990120" }],
+    }),
+  });
+  assert.equal(document.querySelectorAll(".ocr-live-step.is-done").length, 4);
+  assert.equal(
+    document.querySelector(".ocr-ready-actions a").getAttribute("href"),
+    "/api/workspaces/validation/tickets/ticket-0/download",
+  );
+  stream.onerror();
+  assert.match(
+    document.querySelector("#ocr-live-progress").textContent,
+    /Reconnecting/,
+  );
+  dom.window.close();
+});
+test("unmatched OCR and PDF errors never display a ready confirmation", async () => {
+  const { dom, document, progressStreams } = await boot();
+  progressStreams[0].onmessage({
+    data: JSON.stringify({
+      phase: "error",
+      failed_at: "preparing_pdf",
+      file: "scan.pdf",
+      total: 6,
+      completed: 6,
+      matched: 6,
+      revision: 1,
+      ready_tickets: [],
+    }),
+  });
+  assert.match(
+    document.querySelector(".ocr-live-step.is-error").textContent,
+    /Ticket PDF ready/,
+  );
+  assert.equal(document.querySelector(".ocr-ready-actions"), null);
+  assert.doesNotMatch(
+    document.querySelector("#ocr-live-progress").textContent,
+    /OCR \+ PDF ready/,
+  );
+  dom.window.close();
+});
+
+test("Overview replaces the old verification ring with one live verification panel", async () => {
   const { dom, document } = await boot();
-  findButton(document, "Documents").click();
+  findButton(document, "Overview").click();
   await wait(25);
-  assert.equal(document.querySelector("h1").textContent, "Documents");
-  assert.equal(document.querySelectorAll(".document-card").length, 1);
-  findButton(document, "OCR activity").click();
+  assert.equal(document.querySelectorAll("#ocr-live-progress").length, 1);
+  assert.equal(document.querySelector(".coverage-panel"), null);
+  dom.window.close();
+});
+
+test("dragging a PDF submits it to the watched intake and keeps connected-dot layout", async () => {
+  const { dom, document, calls } = await boot();
+  assert.equal(document.querySelectorAll(".progress-dot").length, 4);
+  assert.equal(document.querySelectorAll(".progress-connector-fill").length, 3);
+  const file = new dom.window.File(["demo PDF"], "demo_scan.pdf", {
+    type: "application/pdf",
+  });
+  const drop = new dom.window.Event("drop", {
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(drop, "dataTransfer", { value: { files: [file] } });
+  document.querySelector("#pdf-dropzone").dispatchEvent(drop);
   await wait(25);
-  assert.match(document.querySelector("tbody").textContent, /900120/);
-  findButton(document, "Ingestion history").click();
-  await wait(25);
-  assert.match(document.querySelector("tbody").textContent, /Tracker import/);
+  const upload = calls.find((call) => call.path.endsWith("/intake"));
+  assert.equal(upload.options.method, "POST");
+  assert.equal(upload.options.body, file);
+  assert.match(
+    document.querySelector(".intake-upload-status").textContent,
+    /OCR will start automatically/,
+  );
+  assert.equal(document.querySelectorAll("#navigation button").length, 6);
   dom.window.close();
 });

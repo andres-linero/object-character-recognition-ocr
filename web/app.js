@@ -136,7 +136,7 @@ async function api(path, options) {
 const base = () => `/api/workspaces/${encodeURIComponent(state.dataset)}`;
 const navItems = [
   ["overview", "Overview", "grid"],
-  ["tickets", "Order Tracker", "orders"],
+  ["tickets", "Dataset", "orders"],
   ["documents", "Documents", "file"],
   ["ocr", "OCR activity", "scan"],
   ["review", "Review queue", "circlecheck"],
@@ -178,30 +178,10 @@ function navigation() {
 }
 function datasetControl() {
   return el(
-    "label",
-    { class: "dataset-control" },
+    "span",
+    { class: "dataset-control", "aria-label": "Dataset" },
     icon("grid"),
-    el(
-      "select",
-      {
-        "aria-label": "Dataset",
-        onChange: (event) => {
-          state.dataset = event.target.value;
-          localStorage.setItem("ocr-dataset", state.dataset);
-          state.page = 1;
-          state.documentFilter = "";
-          closeDetail();
-          loadView();
-        },
-      },
-      state.datasets.map((d) =>
-        el(
-          "option",
-          { value: d.id, selected: d.id === state.dataset },
-          d.label,
-        ),
-      ),
-    ),
+    `${state.summary.tickets ?? 0} tracker records`,
   );
 }
 function heading(title, subtitle, actions = []) {
@@ -218,57 +198,355 @@ function heading(title, subtitle, actions = []) {
     el("div", { class: "heading-actions" }, ...actions),
   );
 }
+function intakeDropzone() {
+  const input = el("input", {
+    type: "file",
+    accept: ".pdf,application/pdf",
+    multiple: true,
+    class: "intake-file-input",
+    "aria-label": "Select PDF files",
+    onChange: (event) => uploadIntakeFiles(event.target.files),
+  });
+  const choose = button(
+    state.uploading ? "Adding PDFs…" : "Choose PDF",
+    () => input.click(),
+    "button secondary",
+    "upload",
+  );
+  choose.disabled = !!state.uploading;
+  const zone = el(
+    "section",
+    {
+      id: "pdf-dropzone",
+      class: "intake-dropzone",
+      "aria-label": "PDF intake",
+      onDragOver: (event) => {
+        event.preventDefault();
+        if (!state.uploading) zone.classList.add("is-dragging");
+      },
+      onDragLeave: (event) => {
+        if (!zone.contains(event.relatedTarget))
+          zone.classList.remove("is-dragging");
+      },
+      onDrop: (event) => {
+        event.preventDefault();
+        zone.classList.remove("is-dragging");
+        uploadIntakeFiles(event.dataTransfer?.files);
+      },
+    },
+    icon("upload"),
+    el(
+      "div",
+      { class: "intake-drop-copy" },
+      el("strong", {}, "Drop a PDF to start OCR"),
+      el(
+        "p",
+        {},
+        "Or choose a file. It goes into the same watched intake folder.",
+      ),
+      el(
+        "small",
+        { class: "intake-upload-status", role: "status" },
+        state.uploadMessage || "Generated demo PDFs · up to 50 MB per file",
+      ),
+    ),
+    input,
+    choose,
+  );
+  return zone;
+}
+async function uploadIntakeFiles(files) {
+  if (state.uploading || !files?.length) return;
+  const selected = Array.from(files);
+  if (
+    selected.some(
+      (file) =>
+        !file.name.toLowerCase().endsWith(".pdf") ||
+        file.size > 50 * 1024 * 1024,
+    )
+  ) {
+    state.uploadMessage = "Choose PDF files no larger than 50 MB.";
+    document.querySelector("#pdf-dropzone")?.replaceWith(intakeDropzone());
+    return;
+  }
+  state.uploading = true;
+  let added = 0;
+  state.uploadMessage = `Adding ${selected.length} PDF file(s) to intake…`;
+  document.querySelector("#pdf-dropzone")?.replaceWith(intakeDropzone());
+  try {
+    for (const file of selected) {
+      await api(`${base()}/intake`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/pdf",
+          "X-File-Name": encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      added++;
+    }
+    state.uploadMessage = `${added} PDF file(s) added. OCR will start automatically.`;
+  } catch (error) {
+    state.uploadMessage = `${added ? `${added} added. ` : ""}${error.message}`;
+  } finally {
+    state.uploading = false;
+    document.querySelector("#pdf-dropzone")?.replaceWith(intakeDropzone());
+  }
+}
+
+function liveVerification() {
+  const p = state.liveProgress || {
+    phase: "waiting",
+    total: 0,
+    completed: 0,
+    matched: 0,
+  };
+  const failed = ["error", "needs_attention"].includes(p.phase);
+  const busy = ["receiving", "reading", "matching", "preparing_pdf"].includes(
+    p.phase,
+  );
+  const read = p.total > 0 && p.completed === p.total;
+  const matched = p.total > 0 && p.matched === p.total;
+  const phases = [
+    [
+      "PDF detected",
+      p.total > 0 || p.phase === "ready",
+      p.phase === "receiving",
+      p.total > 0 ? "PDF registered" : "Waiting for a completed file copy",
+    ],
+    [
+      "OCR reading",
+      read,
+      ["reading", "matching"].includes(p.phase) && !read,
+      `${p.completed || 0} / ${p.total || 0} pages processed`,
+    ],
+    [
+      "Matching orders",
+      matched,
+      (p.phase === "matching" || (p.phase === "reading" && p.completed > 0)) &&
+        !matched,
+      `${p.matched || 0} / ${p.total || 0} pages matched`,
+    ],
+    [
+      "Ticket PDF ready",
+      p.phase === "ready",
+      p.phase === "preparing_pdf",
+      p.phase === "ready"
+        ? "Created and checked"
+        : "Created after successful matching",
+    ],
+  ];
+  const failedIndex =
+    p.phase === "needs_attention"
+      ? 2
+      : ({ receiving: 0, reading: 1, matching: 2, preparing_pdf: 3 }[
+          p.failed_at
+        ] ?? 1);
+  const steps = el(
+    "ol",
+    { class: "ocr-live-steps" },
+    ...phases.map(([label, done, active, note], index) => {
+      const error = failed && index === failedIndex;
+      const status = error
+        ? "error"
+        : done
+          ? "done"
+          : active && !failed
+            ? "active"
+            : "waiting";
+      return el(
+        "li",
+        {
+          class: `ocr-live-step is-${status}`,
+          "aria-current": status === "active" ? "step" : null,
+        },
+        el(
+          "span",
+          { class: "progress-node", "aria-hidden": "true" },
+          error ? "!" : el("span", { class: "progress-dot" }),
+        ),
+        el(
+          "div",
+          {},
+          el("strong", {}, label),
+          el("small", {}, error ? "Needs attention" : note),
+        ),
+        index < 3
+          ? el(
+              "span",
+              { class: "progress-connector", "aria-hidden": "true" },
+              el("span", {
+                class: "progress-connector-fill",
+                "data-fill": error
+                  ? 0
+                  : done
+                    ? 1
+                    : index === 1 && p.total
+                      ? p.completed / p.total
+                      : index === 2 && p.total
+                        ? p.matched / p.total
+                        : 0,
+              }),
+            )
+          : null,
+      );
+    }),
+  );
+  const panel = el(
+    "section",
+    {
+      id: "ocr-live-progress",
+      class: `panel ocr-live-panel ${failed ? "has-error" : ""}`,
+      "aria-label": "Live OCR verification",
+      "aria-live": "polite",
+      "aria-busy": busy,
+    },
+    el(
+      "div",
+      { class: "ocr-live-heading" },
+      el(
+        "div",
+        {},
+        el("div", { class: "eyebrow" }, "LIVE PROCESSING"),
+        el("h2", {}, "OCR Verification"),
+      ),
+      badge(
+        state.progressOffline
+          ? "Reconnecting…"
+          : p.phase === "ready"
+            ? "OCR + PDF ready"
+            : failed
+              ? "Needs attention"
+              : busy
+                ? "Processing"
+                : "Watching intake",
+        p.phase === "ready" ? "green" : failed ? "amber" : "blue",
+      ),
+    ),
+    el(
+      "p",
+      { class: "ocr-live-filename" },
+      p.file || "Waiting for your next PDF",
+    ),
+    steps,
+    el(
+      "div",
+      { class: "ocr-live-caption" },
+      busy ? el("span", { class: "live-pulse", "aria-hidden": "true" }) : null,
+      el(
+        "span",
+        {},
+        state.progressOffline
+          ? "Live connection interrupted. Reconnecting automatically; processing continues."
+          : p.message || "Place a demo PDF in Scans/incoming to start.",
+      ),
+    ),
+  );
+  if (p.total > 0)
+    panel.append(
+      el(
+        "div",
+        {
+          class: "ocr-page-progress",
+          role: "progressbar",
+          "aria-label": "OCR pages processed",
+          "aria-valuemin": 0,
+          "aria-valuemax": p.total,
+          "aria-valuenow": p.completed || 0,
+        },
+        el("span", {
+          style: {
+            width: `${Math.min(100, ((p.completed || 0) / p.total) * 100)}%`,
+          },
+        }),
+      ),
+    );
+  if (p.phase === "ready")
+    panel.append(
+      el(
+        "div",
+        { class: "ocr-ready-actions" },
+        ...(p.ready_tickets || []).map((ticket) =>
+          el(
+            "a",
+            {
+              class: "button primary",
+              href: `${base()}/tickets/${ticket.id}/download`,
+            },
+            icon("down"),
+            `Download ${ticket.work_order}`,
+          ),
+        ),
+      ),
+    );
+  panel
+    .querySelectorAll(".progress-connector-fill")
+    .forEach((line) => line.style.setProperty("--fill", line.dataset.fill));
+  return panel;
+}
+function updateLiveVerification() {
+  document.querySelectorAll("#ocr-live-progress").forEach((node) => {
+    const previous = [...node.querySelectorAll(".progress-connector-fill")].map(
+      (line) => line.dataset.fill,
+    );
+    const next = liveVerification();
+    next.querySelectorAll(".progress-connector-fill").forEach((line, index) => {
+      line.style.setProperty("--fill", previous[index] || 0);
+      window.requestAnimationFrame(() =>
+        line.style.setProperty("--fill", line.dataset.fill),
+      );
+    });
+    node.replaceWith(next);
+  });
+}
+function connectLiveProgress() {
+  if (typeof window.EventSource !== "function") return;
+  state.progressSource?.close();
+  const source = new window.EventSource(`${base()}/progress/stream`);
+  state.progressSource = source;
+  source.onmessage = (event) => {
+    try {
+      const progress = JSON.parse(event.data);
+      if (
+        state.liveProgress?.revision === progress.revision &&
+        !state.progressOffline
+      )
+        return;
+      state.liveProgress = progress;
+      state.progressOffline = false;
+      updateLiveVerification();
+    } catch {
+      /* Ignore malformed transport data; keep the last known state. */
+    }
+  };
+  source.onerror = () => {
+    state.progressOffline = true;
+    updateLiveVerification();
+  };
+  source.onopen = () => {
+    state.progressOffline = false;
+    updateLiveVerification();
+  };
+}
+
 function summaryCards() {
-  const s = state.summary;
+  const s = state.scanCounts || {};
+  const total = s.files ?? 0,
+    read = s.files_read ?? 0;
   return el(
     "div",
     { class: "summary-grid" },
     ...[
-      [
-        "Registered Records",
-        s.tickets,
-        "orders",
-        "neutral",
-        "Across this workspace",
-      ],
-      [
-        "OCR Verification",
-        `${s.verified_tickets} / ${s.tickets}`,
-        "circlecheck",
-        "green",
-        "Orders with all expected pages read",
-      ],
-      [
-        "Awaiting OCR",
-        s.tickets - s.verified_tickets,
-        "scan",
-        "amber",
-        "Orders still awaiting complete OCR",
-      ],
-    ].map(([label, value, glyph, tone, note]) =>
+      ["PDF files received", total, "Source files in this intake"],
+      ["OCR complete", `${read} / ${total}`, "All pages read and matched"],
+      ["Files remaining", total - read, "Not yet completely matched"],
+    ].map(([label, value, note]) =>
       el(
         "article",
         { class: "summary-card" },
-        el(
-          "div",
-          { class: "summary-label" },
-          label,
-          el("span", { class: `metric-icon ${tone}` }, icon(glyph)),
-        ),
-        el("div", { class: "summary-value" }, value ?? "—"),
-        el(
-          "div",
-          { class: `summary-note ${tone === "green" ? "positive" : ""}` },
-          tone === "green" ? icon("check") : null,
-          note,
-        ),
-        label === "OCR Verification"
-          ? button(
-              "View read orders",
-              () => navigate("tickets", "verified"),
-              "text-button",
-            )
-          : null,
+        el("div", { class: "summary-label" }, label),
+        el("div", { class: "summary-value" }, value),
+        el("div", { class: "summary-note" }, note),
       ),
     ),
   );
@@ -726,6 +1004,7 @@ async function loadView() {
   main.setAttribute("aria-busy", "true");
   try {
     state.summary = await api(base());
+    state.scanCounts = await api(`${base()}/activity`);
     if (generation !== state.request) return;
     navigation();
     if (["tickets", "review"].includes(state.view)) {
@@ -745,7 +1024,10 @@ async function loadView() {
       if (generation === state.request) documents(data.documents);
     } else if (state.view === "ocr") {
       const data = await api(`${base()}/activity`);
-      if (generation === state.request) activity(data.activity);
+      if (generation === state.request) {
+        state.scanCounts = data;
+        activity(data.activity);
+      }
     } else if (state.view === "imports") {
       const data = await api(`${base()}/imports`);
       if (generation === state.request) imports(data.imports);
@@ -780,52 +1062,8 @@ function overview() {
       ],
     ),
     summaryCards(),
-  );
-  const coverage = s.pages ? Math.round((s.verified_pages / s.pages) * 100) : 0;
-  const coveragePanel = el(
-    "section",
-    { class: "panel coverage-panel" },
-    el(
-      "div",
-      { class: "section-heading" },
-      el("h2", {}, "OCR verification"),
-      badge(
-        s.verified_pages ? "Verified with Azure" : "Ready to process",
-        s.verified_pages ? "green" : "neutral",
-        "shield",
-      ),
-    ),
-    el(
-      "div",
-      { class: "coverage-content" },
-      el(
-        "div",
-        { class: "coverage-ring", style: { "--coverage": `${coverage}%` } },
-        el(
-          "div",
-          {},
-          el("strong", {}, `${coverage}%`),
-          el("small", {}, "pages matched"),
-        ),
-      ),
-      el(
-        "div",
-        {},
-        el("h3", {}, `${s.verified_pages} pages, connected.`),
-        el(
-          "p",
-          {},
-          `${s.documents} source documents. ${s.tickets} organized work orders. Every matched page links back to its original document.`,
-        ),
-        el(
-          "small",
-          { class: "muted" },
-          s.last_verified_at
-            ? `Last verified ${time(s.last_verified_at)}`
-            : "No live OCR attempts yet.",
-        ),
-      ),
-    ),
+    liveVerification(),
+    intakeDropzone(),
   );
   const actions = [
     [
@@ -863,7 +1101,7 @@ function overview() {
       ),
     );
   }
-  main.append(el("div", { class: "overview-grid" }, coveragePanel, quickPanel));
+  main.append(quickPanel);
   const recent = el("div", { class: "recent-list" });
   for (const ticket of state.tickets.slice(0, 5)) {
     recent.append(
@@ -965,92 +1203,173 @@ function documents(rows) {
 }
 function activity(rows) {
   main.replaceChildren(
-    heading("OCR activity", "A page-by-page record of what Azure found.", [
-      datasetControl(),
-      button("Refresh", loadView, "button secondary", "refresh"),
-    ]),
-  );
-  const panel = el(
-    "section",
-    { class: "panel activity-panel" },
+    heading(
+      "Scan intake",
+      "Drop a demo PDF in Scans/incoming. OCR starts automatically and matches its pages to the dataset.",
+      [
+        datasetControl(),
+        button("Refresh results", loadView, "button secondary", "refresh"),
+      ],
+    ),
     el(
-      "div",
-      { class: "section-heading" },
-      el("h2", {}, "Processing history"),
-      badge(`${rows.length} recent attempts`),
+      "p",
+      { class: "tracker-footnote" },
+      "Newest source files first. Company and jobsite come from the matched tracker record. Rental agreement numbers are not recorded in this dataset; Shipment/SO is shown separately.",
     ),
   );
-  if (!rows.length)
-    panel.append(
+  main.append(liveVerification(), intakeDropzone(), summaryCards());
+  if (!rows.length) {
+    main.append(
       empty(
-        "No OCR activity yet",
-        "Manifest expectations are available, but no pages have been sent to Azure.",
+        "No scans registered",
+        "Register scanned PDFs to see their pages and OCR results here.",
       ),
     );
-  else
-    panel.append(
-      el(
+    return;
+  }
+  const resultLabels = {
+    pending: "Not processed",
+    running: "Reading with Azure",
+    success: "Matched",
+    no_match: "Needs attention",
+    error: "Processing failed",
+  };
+  const grid = el("div", { class: "scan-results-grid" });
+  const render = (filter) => {
+    grid.replaceChildren();
+    const visible = rows.filter(
+      (row) => filter === "all" || row.status === filter,
+    );
+    if (!visible.length)
+      grid.append(
+        empty("No pages in this category", "Choose another result filter."),
+      );
+    for (const row of visible) {
+      const order = row.matched_order;
+      const issue =
+        row.status === "no_match"
+          ? row.identifier
+            ? "Identifier read, but no unique tracker order matched."
+            : "No readable ticket identifier found."
+          : row.status === "error"
+            ? `OCR failed (${row.error_code || "provider error"}).`
+            : row.status === "pending"
+              ? "Registered scan; OCR has not run yet."
+              : row.status === "running"
+                ? "OCR request is in progress. Refresh to see the result."
+                : "OCR identifier matched the tracker.";
+      const content = el(
         "div",
-        { class: "table-scroll" },
+        { class: "scan-result-body" },
         el(
-          "table",
-          { class: "orders-table activity-table" },
-          el(
-            "thead",
-            {},
-            el(
-              "tr",
-              {},
-              ...[
-                "Extracted shipment",
-                "Source document",
-                "Page",
-                "Result",
-                "Processed",
-              ].map((h) => el("th", { scope: "col" }, h)),
-            ),
-          ),
-          el(
-            "tbody",
-            {},
-            rows.map((row) =>
-              el(
-                "tr",
-                {},
-                el(
-                  "td",
-                  {},
-                  el(
-                    "strong",
-                    { class: "mono" },
-                    row.identifier || "No identifier",
-                  ),
-                ),
-                el("td", {}, row.document),
-                el("td", {}, row.page),
-                el(
-                  "td",
-                  {},
-                  badge(
-                    row.status === "success"
-                      ? "Matched"
-                      : row.status.replaceAll("_", " "),
-                    row.status === "success"
-                      ? "green"
-                      : row.status === "error"
-                        ? "red"
-                        : "neutral",
-                    row.status === "success" ? "check" : null,
-                  ),
-                ),
-                el("td", { class: "muted" }, time(row.at)),
-              ),
-            ),
+          "div",
+          { class: "section-heading" },
+          el("h2", {}, row.document),
+          badge(
+            resultLabels[row.status] || row.status,
+            row.status === "success"
+              ? "green"
+              : ["error", "no_match"].includes(row.status)
+                ? "amber"
+                : "neutral",
           ),
         ),
-      ),
-    );
-  main.append(panel);
+        el(
+          "p",
+          { class: "muted" },
+          `Source page ${row.page} · ${row.at ? time(row.at) : "No OCR attempt"}`,
+        ),
+        el(
+          "dl",
+          { class: "detail-grid" },
+          field(
+            "OCR read",
+            row.identifier || "No identifier returned",
+            "mono-value",
+          ),
+          field("Work order", order?.work_order || "Not matched", "mono-value"),
+          field("Company (tracker)", order?.customer || "Not matched"),
+          field(
+            "Shipment / SO",
+            order?.shipment || "Not matched",
+            "mono-value",
+          ),
+          field("Rental agreement number", "Not recorded"),
+          field("Jobsite (tracker)", order?.delivery_location || "Not matched"),
+        ),
+        el("p", { class: "scan-result-note" }, issue),
+      );
+      if (order)
+        content.append(
+          el(
+            "div",
+            { class: "heading-actions" },
+            button(
+              "Open matched ticket",
+              () => openDetail(order.id),
+              "button secondary",
+              "orders",
+            ),
+            el(
+              "a",
+              {
+                class: "button primary",
+                href: `${base()}/tickets/${order.id}/download`,
+              },
+              icon("down"),
+              "Download ticket PDF",
+            ),
+          ),
+        );
+      grid.append(
+        el(
+          "article",
+          { class: "panel scan-result-card" },
+          row.page_id
+            ? el(
+                "a",
+                {
+                  href: `${base()}/pages/${row.page_id}/preview`,
+                  target: "_blank",
+                  rel: "noopener",
+                  class: "scan-page-preview",
+                  "aria-label": `Open ${row.document} page ${row.page}`,
+                },
+                el("img", {
+                  src: `${base()}/pages/${row.page_id}/preview`,
+                  alt: `Scan of ${row.document}, page ${row.page}`,
+                  loading: "lazy",
+                }),
+              )
+            : null,
+          content,
+        ),
+      );
+    }
+  };
+  const control = el(
+    "select",
+    {
+      "aria-label": "Filter OCR results",
+      onChange: (event) => render(event.target.value),
+    },
+    ...[
+      ["all", "All scan results"],
+      ["success", "Matched"],
+      ["pending", "Not processed"],
+      ["running", "Reading"],
+    ].map(([value, label]) => el("option", { value }, label)),
+  );
+  main.append(
+    el(
+      "div",
+      { class: "scan-results-toolbar" },
+      el("h2", {}, `Scan results · ${rows.length} pages (up to 200 newest)`),
+      control,
+    ),
+    grid,
+  );
+  render(control.value);
 }
 function imports(rows) {
   main.replaceChildren(
@@ -1565,8 +1884,18 @@ async function boot() {
       ? saved
       : result.default;
     const route = location.hash.slice(2);
-    state.view = navItems.some((n) => n[0] === route) ? route : "tickets";
+    state.view = navItems.some((n) => n[0] === route) ? route : "ocr";
     await loadView();
+    connectLiveProgress();
+    window.setInterval(() => {
+      if (
+        ["ocr", "overview", "documents"].includes(state.view) &&
+        !state.detail &&
+        !state.uploading &&
+        !document.hidden
+      )
+        loadView();
+    }, 5000);
   } catch (error) {
     main.replaceChildren(
       empty(

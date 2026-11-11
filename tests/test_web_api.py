@@ -124,3 +124,68 @@ def test_wrong_order_associations_do_not_inflate_verified_page_counts(api_worksp
     summary = client.get('/api/workspaces/validation').json()
     assert summary['verified_pages'] == 6
     assert summary['verified_tickets'] == 1
+
+
+def test_scan_results_include_pending_pages_and_only_actual_ocr_matches(api_workspace):
+    client, store, dataset = api_workspace
+    response = client.get('/api/workspaces/validation/activity').json()
+    assert response['total'] == 12
+    assert response['files'] == 1
+    assert response['files_read'] == 0
+    assert response['counts']['success'] == response['counts']['pending'] == 6
+    read = [p for p in response['activity'] if p['status'] == 'success']
+    pending = [p for p in response['activity'] if p['status'] == 'pending']
+    assert all(p['matched_order']['work_order'] == 'W-990001' for p in read)
+    assert all(p['matched_order'] is None and p['identifier'] is None for p in pending)
+    assert all('path' not in p and p['page_id'] for p in response['activity'])
+    assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 0
+    page_id = pending[0]['page_id']
+    with store.engine.begin() as connection:
+        connection.execute(db.attempts.insert().values(page_id=page_id, started_at=db.utcnow(),
+            finished_at=db.utcnow(), provider='azure_document_intelligence', status='no_match', identifier='999999'))
+    assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 1
+    response = client.get('/api/workspaces/validation/activity').json()
+    flagged = next(p for p in response['activity'] if p['page_id'] == page_id)
+    assert flagged['status'] == 'no_match' and flagged['matched_order'] is None
+    with store.engine.begin() as connection:
+        connection.execute(db.attempts.insert().values(page_id=page_id, started_at=db.utcnow(),
+            finished_at=db.utcnow(), provider='azure_document_intelligence', status='success', identifier='900002'))
+    assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 0
+
+
+def test_progress_snapshot_reports_worker_state_and_respects_workspace_boundary(api_workspace):
+    client, store, dataset = api_workspace
+    assert client.get('/api/workspaces/validation/progress').json()['phase'] == 'waiting'
+    client.app.state.intake_progress.update('reading', file='demo.pdf', total=6, completed=2, matched=2)
+    response = client.get('/api/workspaces/validation/progress').json()
+    assert response['phase'] == 'reading' and response['completed'] == 2
+    assert response['ready_tickets'] == []
+    assert client.get('/api/workspaces/missing/progress').status_code == 404
+
+
+def test_pdf_drop_queues_a_valid_demo_file_in_the_existing_watch_folder(api_workspace):
+    client, store, dataset = api_workspace
+    sample = next((dataset / 'incoming_scans').glob('*.pdf'))
+    response = client.post('/api/workspaces/validation/intake', content=sample.read_bytes(),
+                           headers={'content-type': 'application/pdf', 'x-file-name': 'my_scan.pdf'})
+    assert response.status_code == 200
+    assert response.json()['status'] == 'queued'
+    uploaded = dataset.parent / 'Scans/incoming' / response.json()['file']
+    assert uploaded.read_bytes() == sample.read_bytes()
+    assert sample.is_file()
+    assert not list((dataset.parent / 'Scans/.uploads').glob('*.part'))
+
+
+def test_pdf_drop_rejects_invalid_input_and_cross_origin_requests(api_workspace, monkeypatch):
+    client, store, dataset = api_workspace
+    route = '/api/workspaces/validation/intake'
+    headers = {'content-type': 'application/pdf', 'x-file-name': 'scan.pdf'}
+    assert client.post(route, content=b'not PDF', headers=headers).status_code == 422
+    assert client.post(route, content=b'%PDF-1.7\ntruncated document', headers=headers).status_code == 422
+    assert client.post(route, content=b'not PDF', headers={**headers, 'x-file-name': '../scan.pdf'}).status_code == 400
+    assert client.post(route, content=b'not PDF', headers={**headers, 'origin': 'https://outside.invalid'}).status_code == 403
+    assert client.post(route, content=b'not PDF', headers={**headers, 'content-type': 'text/plain'}).status_code == 415
+    from ADK_Agentic import web_api
+    monkeypatch.setattr(web_api, 'MAX_UPLOAD_BYTES', 2)
+    assert client.post(route, content=b'123', headers=headers).status_code == 413
+    assert not list((dataset.parent / 'Scans/.uploads').glob('*.part'))

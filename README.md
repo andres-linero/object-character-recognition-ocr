@@ -12,15 +12,17 @@ The local synthetic workspace needs no API key to browse existing records. From 
 python3 -m pip install -r requirements.txt
 # Only if generated datasets are not already present:
 python3 scripts/create_demo_data.py --count 100 --seed 42 --output demo_data
-python3 scripts/prepare_demo.py
+python3 scripts/prepare_workspace.py
 sh scripts/run_web.sh
 ```
 
-Open **http://127.0.0.1:8700**. Select **Azure-verified batches** to inspect the 20 live-verified tickets, or **Full demo dataset** for the complete fixture set. The validated dataset appears after running `scripts/validate_ocr.py` with your own Azure configuration.
+Open **http://127.0.0.1:8700**. The tabs are Overview, Dataset (tracker records), Documents, OCR activity, Review queue, and Ingestion history. There is one live workspace, with no test-stage dropdown. Source records do not become scanned files until a PDF is placed into intake.
 
-The **Order Tracker** has readable rows, search, status/OCR filters, pagination, and CSV export. Select a work order to see delivery location, billing address, equipment, page previews, and expected/extracted OCR identifiers. Ticket downloads include only that order's pages, even when the source PDF contains a full batch. Reviews are saved to SQL.
+Drag a generated demo PDF onto **Drop a PDF to start OCR**, use **Choose PDF**, or place it directly in **`Scans/incoming/`**. Browser uploads are limited to 50 MB and use the same watched-folder workflow. While the server is running, its background worker waits for the copy to stabilize, preserves a source snapshot, and invokes Azure OCR for each unattempted page. Configure `AZURE_DOC_INTEL_ENDPOINT` and `AZURE_DOC_INTEL_KEY` in your local `.env` first; processing incurs provider charges. The view refreshes every five seconds. The local unauthenticated demo accepts PDFs matching the generated fixture manifests; unknown files are skipped rather than labeled synthetic.
 
-Left navigation provides Overview, Order Tracker, Documents, OCR activity, Review queue, and Ingestion history. This interface does not use Streamlit and makes no Azure calls while browsing. See the [product UI guide](docs/product-ui.md) and [database/ETL guide](docs/data-pipeline.md).
+The three new sample PDFs wait outside intake at **`demo_batches/intake_test_03/ready_to_scan/`**. Move or copy one into `Scans/incoming/` to test automatic detection. Earlier test databases remain local archives and are not exposed as separate workspaces.
+
+The Dataset tab shows tracker records. Source PDF file counts, actual OCR page results, previews and ticket-only downloads remain separate from that record count. Company and jobsite are resolved from the tracker after OCR identifies the order. See the [product UI guide](docs/product-ui.md).
 
 ## Legacy signed-in interface
 
