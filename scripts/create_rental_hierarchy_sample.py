@@ -15,6 +15,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.create_demo_data import build_tickets, write_ticket_pdf
 
 
+def _canonical_manifest_paths(manifest):
+    """Keep portable JSON paths and recognize older Windows-generated records."""
+    for record in [*manifest.get('tickets', []), *manifest.get('batches', [])]:
+        if isinstance(record.get('pdf'), str):
+            record['pdf'] = record['pdf'].replace('\\', '/')
+    return manifest
+
+
 def create(root, rasterize=True, batch_number=1, output_name=None):
     scans = root / 'Scans'
     incoming = scans / 'incomming_scan'
@@ -51,13 +59,14 @@ def create(root, rasterize=True, batch_number=1, output_name=None):
             combined.save(output, garbage=4, deflate=True)
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
     for record in records:
-        record.update(pdf=str(output.relative_to(scans)), pdf_sha256=digest)
+        record.update(pdf=output.relative_to(scans).as_posix(), pdf_sha256=digest)
     manifest_path = scans / 'manifest.json'
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else dict(
         generator='ocr-synthetic-demo-v1', synthetic=True, tickets=[])
-    manifest['tickets'] = [t for t in manifest['tickets'] if t.get('pdf') != str(output.relative_to(scans))] + records
+    _canonical_manifest_paths(manifest)
+    manifest['tickets'] = [t for t in manifest['tickets'] if t.get('pdf') != output.relative_to(scans).as_posix()] + records
     manifest['count'] = len(manifest['tickets'])
-    sample = str(output.relative_to(scans))
+    sample = output.relative_to(scans).as_posix()
     manifest['batches'] = [b for b in manifest.get('batches', []) if b['pdf'] != sample] + [dict(pdf=sample, pages=len(sequence))]
     manifest['batch_count'] = len(manifest['batches'])
     manifest['total_pages'] = sum(b['pages'] for b in manifest['batches'])
@@ -72,7 +81,7 @@ def create_batches(root, rasterize=True):
     scans = root / 'Scans'
     scans.mkdir(exist_ok=True)
     manifest_path = scans / 'manifest.json'
-    old = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    old = _canonical_manifest_paths(json.loads(manifest_path.read_text())) if manifest_path.exists() else {}
     backup = Path(tempfile.mkdtemp(prefix='ocr-samples-before-refresh-'))
     if manifest_path.exists():
         shutil.copy2(manifest_path, backup / 'manifest.json')

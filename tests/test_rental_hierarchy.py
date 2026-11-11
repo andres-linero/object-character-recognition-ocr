@@ -248,7 +248,8 @@ def test_sample_refresh_creates_64_grouped_work_orders_and_preserves_workspace(t
     old.write_bytes(b'previous sample')
     manifest_path = tmp_path / 'Scans/manifest.json'
     manifest_path.write_text(json.dumps(dict(generator='ocr-synthetic-demo-v1', synthetic=True,
-        tickets=[dict(order_id='W-991001', pdf='incomming_scan/batch_01_8_orders.pdf', pdf_sha256='a' * 64)])))
+        tickets=[dict(order_id='W-991001', pdf='incomming_scan/batch_01_8_orders.pdf', pdf_sha256='a' * 64),
+                 dict(order_id='W-991002', pdf='incomming_scan\\batch_01_8_orders.pdf', pdf_sha256='b' * 64)])))
     manifest, backup = create_batches(tmp_path, rasterize=False)
     main = [r for r in manifest['tickets'] if r.get('sample_role') == 'batch']
     assert len(main) == len({r['order_id'] for r in main}) == 64
@@ -261,6 +262,9 @@ def test_sample_refresh_creates_64_grouped_work_orders_and_preserves_workspace(t
     assert uploaded.read_bytes() == b'uploaded source stays untouched'
     assert (backup / 'incomming_scan/batch_01_8_orders.pdf').read_bytes() == b'previous sample'
     assert 'a' * 64 in manifest['legacy_allowed_hashes']
+    assert 'b' * 64 in manifest['legacy_allowed_hashes']
+    assert all('\\' not in t['pdf'] for t in manifest['tickets'])
+    assert sum(t.get('sample_role') == 'alias' for t in manifest['tickets']) == 8
     first = tmp_path / 'Scans/incomming_scan/batch_01_8_orders.pdf'
     assert first.read_bytes() == (first.parent / 'rental_orders_RO_OD_SO_shuffled.pdf').read_bytes()
     with fitz.open(first) as pdf:
