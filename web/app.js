@@ -142,11 +142,11 @@ const navItems = [
   ["review", "Review queue", "circlecheck"],
   ["imports", "Ingestion history", "clock"],
 ];
-function navigate(view) {
+function navigate(view, filter = "all") {
   state.view = view;
   state.page = 1;
   state.query = "";
-  state.filter = "all";
+  state.filter = filter;
   state.status = "all";
   state.documentFilter = "";
   closeDetail();
@@ -225,27 +225,26 @@ function summaryCards() {
     { class: "summary-grid" },
     ...[
       [
-        "Registered orders",
+        "Registered Records",
         s.tickets,
         "orders",
         "neutral",
         "Across this workspace",
       ],
       [
-        "OCR verified",
-        s.verified_tickets,
+        "OCR Verification",
+        `${s.verified_tickets} / ${s.tickets}`,
         "circlecheck",
         "green",
-        `${s.verified_pages} pages matched`,
+        "Orders with all expected pages read",
       ],
       [
         "Awaiting OCR",
         s.tickets - s.verified_tickets,
         "scan",
         "amber",
-        "Ready for processing",
+        "Orders still awaiting complete OCR",
       ],
-      ["To review", s.review_queue, "eye", "blue", "Awaiting a human review"],
     ].map(([label, value, glyph, tone, note]) =>
       el(
         "article",
@@ -263,6 +262,13 @@ function summaryCards() {
           tone === "green" ? icon("check") : null,
           note,
         ),
+        label === "OCR Verification"
+          ? button(
+              "View read orders",
+              () => navigate("tickets", "verified"),
+              "text-button",
+            )
+          : null,
       ),
     ),
   );
