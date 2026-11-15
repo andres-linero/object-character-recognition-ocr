@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --locked --all-groups
-      - run: uv run --locked ruff check ADK_Agentic scripts tests
+      - run: uv run --locked ruff check ocr_workspace scripts tests
       - run: uv run --locked pytest -q
       - uses: actions/setup-node@v4
         with:
@@ -48,7 +48,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --locked --all-groups
-      - run: uv run --locked ruff check ADK_Agentic scripts tests
+      - run: uv run --locked ruff check ocr_workspace scripts tests
       - run: uv run --locked pytest -q
 
   secrets:

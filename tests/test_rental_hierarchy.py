@@ -8,12 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from ADK_Agentic import ocr, storage as db
-from ADK_Agentic.document_data import observe_rental_context
-from ADK_Agentic.etl import checksum
-from ADK_Agentic.intake_watcher import IntakeWatcher
-from ADK_Agentic.processing import register_pdf, process_page
-from ADK_Agentic.web_api import create_app
+from ocr_workspace import ocr, storage as db
+from ocr_workspace.document_data import observe_rental_context
+from ocr_workspace.etl import checksum
+from ocr_workspace.intake_watcher import IntakeWatcher
+from ocr_workspace.processing import register_pdf, process_page
+from ocr_workspace.web_api import create_app
 from scripts.create_rental_hierarchy_sample import create
 
 
@@ -177,8 +177,36 @@ def test_od_ro_and_so_are_three_distinct_identifiers():
     assert 'work_order' not in without_order.identifiers
 
 
+def test_clean_batch_10_has_all_orders_and_all_identifiers_inside_the_crop(tmp_path):
+    from ocr_workspace.intake_watcher import ProgressState
+    pdf, records, sequence = create(tmp_path, rasterize=False, batch_number=10, clean=True)
+    assert pdf.name == 'batch_10_ALL_CORRECT_8_orders.pdf'
+    assert len(records) == 8 and len(sequence) == 48
+    assert {r['order_id'] for r in records} == {f'OD-{n}' for n in range(992073, 992081)}
+    assert all(r['test_case'] == 'good' and not r['shifted_order_pages'] for r in records)
+    with fitz.open(pdf) as source:
+        responses = [ocr.parse_identifier(page.get_text(clip=fitz.Rect(306, 0, 612, 198))) for page in source]
+    for record in records:
+        assert {p['source_page'] for p in record['pages']} == set(range(1, 7))
+        for page in record['pages']:
+            assert page['expected_order_readable']
+            assert responses[page['page'] - 1].identifiers == dict(work_order=record['order_id'],
+                rental_order=record['parent_rental_number'], shipment=record['shipment'])
+    response_iterator = iter(responses)
+    store = db.Store(db.sqlite_url(tmp_path / 'clean.sqlite'))
+    store.migrate()
+    progress = ProgressState()
+    worker = IntakeWatcher(store, pdf.parent, {checksum(pdf)}, lambda *a, **kw: next(response_iterator), root=tmp_path, progress=progress)
+    worker.tick(submitted=pdf)
+    assert progress.snapshot()['phase'] == 'ready'
+    assert len(progress.snapshot()['ready_tickets']) == 8
+    assert store.counts()['orders'] == 8
+    assert all(row['status'] == 'success' for row in store.rows(select(db.attempts)))
+    store.close()
+
+
 def test_zip_summary_counts_only_current_scan_and_updates_after_manual_fix(hierarchy, tmp_path):
-    from ADK_Agentic.intake_watcher import prepare_ticket_pdfs
+    from ocr_workspace.intake_watcher import prepare_ticket_pdfs
     client, store, _, _ = hierarchy
     document = store.rows(select(db.documents))[0]
     unrelated = dict(store.rows(select(db.orders))[0], id=db.uid(), order_number='OD-999999', shipment_number='999999')
@@ -206,7 +234,7 @@ def test_zip_summary_counts_only_current_scan_and_updates_after_manual_fix(hiera
 
 def test_saved_scan_zip_summary_survives_restart_without_provider_calls(hierarchy, tmp_path, monkeypatch):
     import sqlite3
-    from ADK_Agentic.intake_watcher import prepare_ticket_pdfs
+    from ocr_workspace.intake_watcher import prepare_ticket_pdfs
     _, store, _, _ = hierarchy
     document = store.rows(select(db.documents))[0]
     prepare_ticket_pdfs(store, document['id'], tmp_path / 'Scans/output', allow_partial=True)

@@ -90,7 +90,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
         if worker:
             worker.join(timeout=1)
 
-    app = FastAPI(title="OCR Workspace API", version="1.0.0", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)
+    app = FastAPI(title="Order Scanner API", version="1.0.0", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)
     app.state.intake_progress = progress
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
 

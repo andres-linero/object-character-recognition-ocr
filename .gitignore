@@ -3,10 +3,6 @@ agents_env/
 .env
 *.env.*
 
-# Streamlit secrets — never commit credentials
-.streamlit/secrets.toml
-.streamlit/secrets.toml.example
-.streamlit/*.bak
 # Python
 __pycache__/
 *.pyc
@@ -15,7 +11,6 @@ __pycache__/
 
 # OS
 .DS_Store
-Gen_AI/Clients practice for OCR.xlsx
 
 # IDE / Tools
 .adk/
@@ -29,12 +24,10 @@ Scans/
 
 
 # Generated at runtime
-ADK_Agentic/cache/
-ADK_Agentic/output/
-ADK_Agentic/upload_ready/
-ADK_Agentic/logs/
-ADK_Agentic/streamlit.log
-ADK_Agentic/streamlit.log.err
+ocr_workspace/cache/
+ocr_workspace/output/
+ocr_workspace/upload_ready/
+ocr_workspace/logs/
 
 # Notebooks
 *.ipynb
@@ -85,3 +78,11 @@ $RECYCLE.BIN/
 
 # Web UI development dependencies
 node_modules/
+
+# Private credential files and local cloud settings
+*.pem
+*.key
+*.p12
+*.pfx
+/.aws/
+/.azure/

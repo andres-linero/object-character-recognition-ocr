@@ -9,9 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from ADK_Agentic import ocr, storage as db
-from ADK_Agentic.etl import checksum
-from ADK_Agentic.web_api import create_app
+from ocr_workspace import ocr, storage as db
+from ocr_workspace.etl import checksum
+from ocr_workspace.web_api import create_app
 from scripts.create_demo_data import generate_dataset
 
 

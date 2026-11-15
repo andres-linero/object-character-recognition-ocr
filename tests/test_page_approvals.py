@@ -7,11 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from ADK_Agentic import ocr, storage as db
-from ADK_Agentic.etl import checksum
-from ADK_Agentic.intake_watcher import IntakeWatcher
-from ADK_Agentic.processing import register_pdf
-from ADK_Agentic.web_api import create_app
+from ocr_workspace import ocr, storage as db
+from ocr_workspace.etl import checksum
+from ocr_workspace.intake_watcher import IntakeWatcher
+from ocr_workspace.processing import register_pdf
+from ocr_workspace.web_api import create_app
 from scripts.create_demo_data import generate_dataset
 
 
@@ -179,7 +179,7 @@ def test_conflicting_identity_or_page_cannot_be_overridden(repair_workspace, fie
     fields[field] = value
     # Add a known parent to the target when testing a conflicting RO.
     if field == 'parent_rental_number':
-        from ADK_Agentic.etl import upsert
+        from ocr_workspace.etl import upsert
         with store.engine.begin() as connection:
             customer = connection.scalar(select(db.orders.c.customer_id).where(db.orders.c.id == ticket['id']))
             parent = upsert(connection, db.rental_orders, ['source_system', 'customer_id', 'rental_number'], dict(source_system='documents', customer_id=customer, rental_number='RO-810001', address=''))
@@ -264,7 +264,7 @@ def test_ro_migration_preserves_approvals_and_allows_shared_shipments(repair_wor
 
 
 def test_pdf_preparation_failure_can_retry_without_duplicate_approval(repair_workspace, monkeypatch):
-    from ADK_Agentic import intake_watcher
+    from ocr_workspace import intake_watcher
     client, store, ticket, candidate, _, _, _ = repair_workspace
     prepare = intake_watcher.prepare_ticket_pdfs
     calls = []

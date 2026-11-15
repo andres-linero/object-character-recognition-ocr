@@ -1,58 +1,44 @@
 # Configuration and data
 
-Run commands from the repository root. Copy `.env.example` to `.env` and supply your own resources. Never place real secrets in a Google Doc, issue, recording, or commit.
+Run from the repository root. Copy `.env.example` to `.env` if no local file exists and supply your Azure resources. Preserve existing credentials; never commit `.env`.
 
-The live app and standalone pipeline load `.env`; the synthetic preview uses isolated local storage without loading live credentials. See [the data-pipeline guide](data-pipeline.md).
+## Current web app
 
-## Environment variables
-
-| Variable | Purpose | Requirement/default |
-| --- | --- | --- |
-| `DATABASE_URL` | SQL store URL; blank retains legacy Excel order reads | Optional in live app; required by pipeline CLI |
-| `POSTGRES_PASSWORD` | Local Compose PostgreSQL password | Required only for Compose |
-| `DEMO_DATABASE_PATH` | Override local synthetic preview DB path | Defaults to `demo_runtime/demo.sqlite` |
-| `AZURE_TENANT_ID` | Microsoft Entra tenant | Required for sign-in |
-| `AZURE_CLIENT_ID` | Entra confidential application client | Required for sign-in |
-| `AZURE_CLIENT_SECRET` | Entra client secret | Required for sign-in |
-| `AZURE_REDIRECT_URI` | Registered web callback | `http://localhost:8501` |
-| `AZURE_DOC_INTEL_ENDPOINT` | Document Intelligence resource endpoint | Required when OCR runs |
-| `AZURE_DOC_INTEL_KEY` | Document Intelligence resource key | Required when OCR runs |
-| `EXCEL_PATH` | Workbook path | Sample: `examples/orders.xlsx`; relative paths depend on launch directory |
-| `SCAN_PDF_PATH` | Incoming scan directory | Repository `Scans/incoming_scans/`; immediate lowercase `*.pdf` files only |
-| `USE_AZURE_KEYVAULT` | Enable Key Vault loading | Off; accepts `1`, `true`, `yes`, `on` |
-| `AZURE_KEY_VAULT_URL` | Your Key Vault URL | Required when Key Vault is enabled |
-| `OCR_HEADER_NOISE` | Exact text fragments removed before matching | Optional, separated by `|` |
-| `OCR_EXCLUDED_NUMBERS` | Numeric fallback candidates to ignore | Optional, comma-separated |
-
-Key Vault loads OCR endpoint/key and Entra client ID/secret/tenant from the hyphenated secret names declared in `config.py`. Successful values override local environment values. Individual missing secrets are skipped; other failures fall back to environment configuration. The redirect URI and workbook/scan paths are not loaded from Key Vault.
-
-## Workbook contract
-
-All non-empty worksheets are combined; `Source_Sheet` records the original worksheet name. The loader is permissive and does not enforce a formal schema.
-
-| Column | Meaning |
+| Setting | Purpose |
 | --- | --- |
-| `Order_ID` | Work-order identifier, for example `W-100001` |
-| `SO` | Shipment/sales-order identifier, for example `3501` |
-| `Customer_name` | Customer display name; `Customer` is accepted as an alias |
-| `Ship_to` | Destination display value; use the underscore spelling |
-| `Status` | Workbook workflow state; views interpret completion values |
-| `Deadline` | Optional deadline display/filter input |
-| `Deadline Status` | Optional deadline state; `Deadline status` is an alias |
-| `Requested by` | Optional assignment/display value |
+| `AZURE_DOC_INTEL_ENDPOINT` | Azure Document Intelligence endpoint, required for OCR |
+| `AZURE_DOC_INTEL_KEY` | Azure Document Intelligence key, required for OCR |
+| `OCR_PYTHON` | Optional interpreter override for `scripts/run_web.sh` |
+| `OCR_HEADER_NOISE` | Optional form-specific text exclusions, separated by `|` |
+| `OCR_EXCLUDED_NUMBERS` | Optional comma-separated numeric exclusions |
+| `OCR_ALLOW_UNLABELED_FALLBACK` | Legacy ambiguous-number fallback; off by default |
 
-Keep identifiers as text when possible. `Order_ID` and `SO` are trimmed and trailing `.0` artifacts removed. Some lookups remove leading zeroes or the `W-` prefix; this is heuristic matching, not a universal ID contract. Missing columns can produce blank or reduced views instead of a schema error.
+The intake worker reads the two Azure credentials from `.env`, falling back to environment values. The app uses `demo_runtime/workspace.sqlite` and managed PDFs in `Scans/`. It serves the browser UI on http://127.0.0.1:8700.
+
+Streamlit, Microsoft Entra sign-in and Key Vault configuration belonged to the removed interfaces. Their environment variables are no longer required by the current app. The local `.env` is not automatically rewritten.
+
+## Separate tools
+
+| Setting | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Relational store used by ingestion CLI tools |
+| `POSTGRES_PASSWORD` | Password required by the optional Compose PostgreSQL service |
+| `EXCEL_PATH` | Workbook path used by legacy workbook utilities |
+| `SCAN_PDF_PATH` | Scan directory override used by legacy indexing utilities |
+
+Workbook imports and older demo preparation are separate from browser uploads. The current tracker derives orders from uploaded documents. See [the data-pipeline guide](data-pipeline.md) for CLI ingestion.
 
 ## Local files
 
-| Location | Contents | Lifecycle |
-| --- | --- | --- |
-| `Scans/incoming_scans/` | Source ticket PDFs | Operator managed |
-| `ADK_Agentic/cache/excel_cache.pkl` | Workbook data/signature | Rebuilt as needed; trusted pickle only |
-| `ADK_Agentic/cache/scan_index.json` | OCR associations/signatures | Retained across runs |
-| `ADK_Agentic/cache/downloads*.json` | Download flags | Local workflow state |
-| `ADK_Agentic/cache/scan_review_status.json` | Review flags | Local workflow state |
-| `ADK_Agentic/upload_ready/` | Extracted order PDFs and previews | Retained; no automatic age cleanup |
-| `ADK_Agentic/output/` | Final PDFs from downstream/manual workflow | Files older than seven days removed after authenticated execution |
+| Location | Contents |
+| --- | --- |
+| `Scans/incomming_scan/` | Selectable samples and submitted uploads |
+| `Scans/processed/` | Preserved original PDFs |
+| `Scans/flag_order/` | Scans and reports needing attention |
+| `Scans/output/` | Compiled PDFs |
+| `Scans/manifest.json` | Synthetic sample allowlist and expected cases |
+| `demo_runtime/workspace.sqlite` | Orders, pages, attempts, approvals and download receipts |
+| `demo_runtime/read-scan` | Compiled local extraction helper |
+| `ocr_workspace/cache/` | Separate legacy workbook/index caches, if generated |
 
-Generated files and workbooks are excluded from Git. Backups, retention, and deletion must account for copies, previews, and index entries as well as original scans.
+Generated data and runtime files are excluded from Git. Back up the database and its referenced files together. See [operations](operations.md) for recovery guidance.

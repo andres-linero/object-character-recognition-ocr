@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from ADK_Agentic import etl, storage as db
-from ADK_Agentic.processing import register_pdf
-from ADK_Agentic.web_api import create_app
+from ocr_workspace import etl, storage as db
+from ocr_workspace.processing import register_pdf
+from ocr_workspace.web_api import create_app
 from scripts import create_demo_data as demo
 
 
@@ -129,7 +129,7 @@ def test_incomplete_or_unavailable_pdf_does_not_get_a_download_mark(api_workspac
 
 
 def test_changed_pdf_version_is_available_as_a_new_download(api_workspace):
-    from ADK_Agentic.etl import checksum
+    from ocr_workspace.etl import checksum
     client, store, dataset = api_workspace
     ready = next(t for t in client.get('/api/workspaces/validation/tickets').json()['tickets'] if t['download_ready'])
     route = f"/api/workspaces/validation/tickets/{ready['id']}"
@@ -272,7 +272,7 @@ def test_pdf_drop_rejects_invalid_input_and_cross_origin_requests(api_workspace,
     assert client.post(route, content=b'not PDF', headers={**headers, 'x-file-name': '../scan.pdf'}).status_code == 400
     assert client.post(route, content=b'not PDF', headers={**headers, 'origin': 'https://outside.invalid'}).status_code == 403
     assert client.post(route, content=b'not PDF', headers={**headers, 'content-type': 'text/plain'}).status_code == 415
-    from ADK_Agentic import web_api
+    from ocr_workspace import web_api
     monkeypatch.setattr(web_api, 'MAX_UPLOAD_BYTES', 2)
     assert client.post(route, content=b'123', headers=headers).status_code == 413
     assert not list((dataset.parent / 'Scans/.uploads').glob('*.part'))
@@ -281,7 +281,7 @@ def test_pdf_drop_rejects_invalid_input_and_cross_origin_requests(api_workspace,
 def test_scan_zip_contains_only_ready_ticket_pdfs(api_workspace):
     import io
     import zipfile
-    from ADK_Agentic.intake_watcher import prepare_ticket_pdfs
+    from ocr_workspace.intake_watcher import prepare_ticket_pdfs
 
     client, store, dataset = api_workspace
     progress = client.app.state.intake_progress
@@ -313,7 +313,7 @@ def test_scan_zip_contains_only_ready_ticket_pdfs(api_workspace):
 
 
 def test_changed_registered_source_blocks_preview_download_and_receipts(api_workspace):
-    from ADK_Agentic.intake_watcher import prepare_ticket_pdfs
+    from ocr_workspace.intake_watcher import prepare_ticket_pdfs
     client, store, dataset = api_workspace
     ready = next(t for t in client.get('/api/workspaces/validation/tickets').json()['tickets'] if t['download_ready'])
     document = store.rows(select(db.documents))[0]
@@ -332,7 +332,7 @@ def test_changed_registered_source_blocks_preview_download_and_receipts(api_work
 def test_scan_zip_cannot_export_a_stale_or_replaced_prepared_pdf(api_workspace):
     import io
     import zipfile
-    from ADK_Agentic.intake_watcher import prepare_ticket_pdfs
+    from ocr_workspace.intake_watcher import prepare_ticket_pdfs
     client, store, dataset = api_workspace
     document = store.rows(select(db.documents))[0]
     ready = prepare_ticket_pdfs(store, document['id'], dataset.parent / 'Scans/output')

@@ -1,7 +1,9 @@
 """Replace generated demo inputs with eight shuffled, multi-order scan batches.
 
-Run only with the web server stopped. No Azure calls are made.
+Deletes Scans, demo_data, demo_batches and demo_runtime, including uploads and history.
+Run only with the web server stopped and --confirm-reset. No Azure calls are made.
 """
+import argparse
 from dataclasses import asdict
 import hashlib
 import json
@@ -15,7 +17,7 @@ import fitz
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.create_demo_data import build_tickets, write_ticket_pdf
-from ADK_Agentic import storage as db
+from ocr_workspace import storage as db
 
 CASES = ('good', 'missing_identifier', 'good', 'unknown_shipment',
          'missing_identifier', 'missing_page', 'unknown_shipment', 'good')
@@ -103,5 +105,15 @@ def replace(root):
         store.close()
 
 
-if __name__ == '__main__':
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--confirm-reset', action='store_true',
+                        help='Delete ALL local scans, uploads, databases and workflow history')
+    args = parser.parse_args(argv)
+    if not args.confirm_reset:
+        parser.error('Reset refused. Back up local data, stop the server, then pass --confirm-reset.')
     replace(Path(__file__).resolve().parents[1])
+
+
+if __name__ == '__main__':
+    main()

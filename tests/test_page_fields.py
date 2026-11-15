@@ -6,11 +6,11 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from ADK_Agentic import storage as db, ocr
-from ADK_Agentic.document_data import extract_fields
-from ADK_Agentic import document_data
-from ADK_Agentic.processing import process_page, register_pdf
-from ADK_Agentic.web_api import create_app
+from ocr_workspace import storage as db, ocr
+from ocr_workspace.document_data import extract_fields
+from ocr_workspace import document_data
+from ocr_workspace.processing import process_page, register_pdf
+from ocr_workspace.web_api import create_app
 from scripts.create_demo_data import generate_dataset
 from scripts.extract_page_details import extract_existing
 

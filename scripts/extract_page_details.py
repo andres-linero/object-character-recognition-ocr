@@ -8,9 +8,9 @@ from sqlalchemy import select
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from ADK_Agentic import storage as db
-from ADK_Agentic.document_data import extract_fields, save_page_fields
-from ADK_Agentic.etl import checksum
+from ocr_workspace import storage as db
+from ocr_workspace.document_data import extract_fields, save_page_fields
+from ocr_workspace.etl import checksum
 
 
 def extract_existing(store, roots, refresh=False):

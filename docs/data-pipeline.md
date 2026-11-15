@@ -2,33 +2,21 @@
 
 ## What is implemented
 
-The project now has a SQLAlchemy data layer for PostgreSQL and SQLite, an initial versioned schema, Excel/CSV ETL, synthetic-manifest registration, SQL reconciliation queries, page-level OCR attempts/retries, and a separate synthetic preview. The original signed-in dashboard can read SQL orders when `DATABASE_URL` is configured. Its scan/download/review workflow still uses the legacy file-backed index; migrating that UI completely remains a separate step.
+The project has a SQLAlchemy data layer for PostgreSQL and SQLite, versioned migrations, Excel/CSV ETL, synthetic-manifest registration, reconciliation queries, and page-level OCR attempts/retries. The current web app is document-driven and uses SQLite; workbook imports are separate CLI tools.
 
 Excel is retained as an import/export boundary. Database tables hold normalized orders, customers, document/page records, expected or OCR-derived associations, source rows, validation failures, and processing history. PDF bytes stay in managed files; the database stores paths and SHA-256 checksums.
 
-## Local synthetic preview
+## Local workspace
 
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install -r requirements.txt -r requirements-data.txt
-# Generate only if demo_data does not already exist:
-python3 scripts/create_demo_data.py --count 100 --seed 42 --output demo_data
-python3 scripts/prepare_demo.py
-sh scripts/run_demo.sh
-```
+Follow the [README](../README.md) to prepare the workspace, generate current PDF samples, and run `sh scripts/run_web.sh`. Open http://127.0.0.1:8700. Uploading a PDF creates order rows through OCR; generating samples does not preload them.
 
-Open http://127.0.0.1:8502. Preparation imports `demo_data` and the two additional generated batches if present. The existing local dataset yields 120 orders and 1,050 pages. A clean clone with only the default generator output yields 100 orders and 930 pages. No generated dataset or database is committed.
+The former Streamlit preview and `run_demo.sh` launcher have been removed. `prepare_demo.py` remains a CLI fixture utility for older generated datasets, separate from the current workspace startup.
 
-`run_demo.sh` uses the repository virtual environment, then the existing parent environment if available, then `python3`. Set `OCR_PYTHON` to an explicit interpreter if needed. This avoids relying on a shell command named `python`.
-
-The preview does not load `.env`, connect to Azure, or change the live app's authentication. It reads an isolated database in `demo_runtime/`, refuses sources/documents marked non-synthetic, and restricts PDF downloads to the generated dataset directories. `DEMO_DATABASE_PATH` optionally chooses a different local demo database. The preview is intended for localhost; it has no production authentication.
-
-Manifest-derived associations appear as **Manifest_Pages**, while verified provider associations appear as **OCR_Verified_Pages**. The manifest is test ground truth, not a substitute for OCR. Generated sample sizes are not accuracy or throughput measurements.
+Manifest-derived associations are test expectations, not verified provider readings. Generated sample sizes are not accuracy or throughput measurements.
 
 ## PostgreSQL setup
 
-Requires Docker with Compose, or an existing PostgreSQL instance. Docker/PostgreSQL are not prerequisites for the SQLite preview.
+Requires Docker with Compose, or an existing PostgreSQL instance. Docker/PostgreSQL are not prerequisites for the SQLite workspace.
 
 1. Copy `.env.example` to `.env` if no local file exists. Preserve existing credentials.
 2. Set a local `POSTGRES_PASSWORD` and start `docker compose up -d postgres`.
@@ -53,7 +41,7 @@ The database role must be allowed to create the `staging`, `core`, and `ops` sch
 
 SQLite maps these logical schemas into one local namespace, while retaining the same table/constraint model. Primary and foreign keys enforce relationships. Uniqueness covers source checksums, source-system/order numbers, source-system/shipment numbers, document checksums, document/page pairs, and association methods. Check constraints restrict statuses and require positive page numbers/counts. SQLite foreign keys are enabled explicitly.
 
-`ADK_Agentic/storage.py` defines the schema and versioned startup migrations. Migration 2 adds manual page approvals; migration 3 adds rental orders, their child tickets and identified pages, and permits multiple tickets to share a shipment. Migration 4 retains local extraction for every page independently of its match status. Migration 5 adds version-specific download receipts. Existing pages, attempts and approvals survive upgrades. The numbered SQL files in `database/` describe the PostgreSQL changes. Run `python3 scripts/export_schema.py` to export a current schema snapshot to `database/current_schema.sql`; it does not rewrite historical migrations.
+`ocr_workspace/storage.py` defines the schema and versioned startup migrations. Migration 2 adds manual page approvals; migration 3 adds rental orders, their child tickets and identified pages, and permits multiple tickets to share a shipment. Migration 4 retains local extraction for every page independently of its match status. Migration 5 adds version-specific download receipts. Existing pages, attempts and approvals survive upgrades. The numbered SQL files in `database/` describe the PostgreSQL changes. Run `python3 scripts/export_schema.py` to export a current schema snapshot to `database/current_schema.sql`; it does not rewrite historical migrations.
 
 ## ETL behavior
 

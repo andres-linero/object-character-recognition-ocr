@@ -244,7 +244,7 @@ class DataLoader:
     def maybe_reload(self) -> bool:
         """Reload the Excel file if it has changed on disk since last read.
 
-        Called on every Streamlit rerun. Cheap — one getmtime() call when the
+        Called by clients to check for workbook changes. One getmtime() call when the
         file hasn't changed, full reload only when the file was modified.
         Returns True if a reload actually happened.
         """

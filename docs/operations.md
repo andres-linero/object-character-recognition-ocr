@@ -1,41 +1,38 @@
 # Operations guide
 
-## Synthetic preview
+## Start locally
 
-Run `python3 scripts/prepare_demo.py`, then `sh scripts/run_demo.sh`. Open http://127.0.0.1:8502. This uses synthetic SQL data and no Azure calls or sign-in. See [the pipeline guide](data-pipeline.md) for the separate live workflow.
+Follow the [README](../README.md) to install the locked dependencies and configure Azure OCR. Run:
 
-## First local run
+```sh
+uv run --locked python scripts/prepare_workspace.py
+uv run --locked python scripts/create_rental_hierarchy_sample.py --all-batches
+sh scripts/run_web.sh
+```
 
-Follow the root README to create an environment, install dependencies, copy `.env.example`, and generate synthetic data. Configure your own Azure OCR resource and Entra web app, then launch Streamlit from the repository root. Confirm successful sign-in before using real documents.
+Open http://127.0.0.1:8700. Select a sample from `Scans/incomming_scan/` and upload it in the browser. Copying a file into the folder does not submit it. Processing uses Azure and may incur charges; sample generation does not.
 
-Use the synthetic shipment `3501` to check the end-to-end workflow: open the dashboard, sign in, allow scan indexing, confirm the workbook order matches the ticket, and open its preview/download. This invokes paid Azure OCR. Automated tests use mocked Azure and do not replace this check.
+The former Streamlit interfaces and demo launcher have been removed. There is no Microsoft sign-in flow in the current localhost synthetic workspace.
 
-## Diagnose common problems
+## Diagnose problems
 
-| Symptom | Check | Next action |
-| --- | --- | --- |
-| SSO configuration error | Tenant ID, client ID, and secret presence | Correct local configuration and restart |
-| Redirect/state error | Entra callback URI and browser/session behavior | Restart sign-in; collect redacted error information; do not bypass state checks |
-| Empty workbook view | `EXCEL_PATH`, readable file, exact headers | Use an absolute path and compare against the data contract |
-| New PDF not visible | Scan directory, lowercase `.pdf`, dashboard rerun | Place PDF directly in configured folder and trigger a rerun |
-| OCR has no match | Azure settings, crop position, labels, exclusions | Inspect a synthetic/redacted example and adjust form-specific configuration |
-| OCR failure does not retry | Cached PDF signature may have been saved | Investigate first; controlled reindexing can repeat Azure charges |
-| Final PDF disappeared | `output/` seven-day cleanup | Restore from approved backup if needed; distinguish it from retained `upload_ready/` artifacts |
-
-Do not copy raw exception logs into public issues without checking paths, identifiers, and provider details.
+| Symptom | Check |
+| --- | --- |
+| App does not start | Python version, locked dependencies and port 8700 availability |
+| OCR worker reports missing credentials | `AZURE_DOC_INTEL_ENDPOINT` and `AZURE_DOC_INTEL_KEY` in `.env` |
+| PDF is refused | Current synthetic manifest allowlist and 50 MB upload limit |
+| Processing has no match | Identifier position within the crop and processing evidence |
+| Order is incomplete | Flags, missing printed pages and conflicting extracted fields |
+| Failed provider attempt | Inspect the saved failure; failed attempts are not silently retried |
 
 ## Recovery and retention
 
-Stop the app before changing local state. Back up source files and the complete local state directories as a consistent set if workflow history must be preserved. Do not open untrusted pickle caches.
+Stop the app before changing local state. Back up `demo_runtime/workspace.sqlite` and the complete `Scans/` directory together to preserve database references, original uploads, page reports and compiled files. Preserve any SQLite journal sidecars when present. No backup scheduler is included.
 
-For a suspected corrupt workbook cache, move the cache file aside while stopped, then restart and allow it to rebuild. Preserve the original for diagnosis if permitted. Do not erase the scan index casually: it contains associations to source PDFs that may have been removed.
+Startup applies migrations and recovers pending durable upload markers. Do not use `scripts/rebuild_scan_dataset.py` for ordinary recovery: it is a destructive reset tool that requires `--confirm-reset` and deletes scans, uploads, databases and workflow history. Sample regeneration preserves uploaded originals and workflow history.
 
-The legacy scan index has no dedicated retry CLI or transactional rollback. The new database-backed pipeline provides page-level error retries and transactional tracker ingestion; see the pipeline guide. No backup scheduler is included. A full reindex requires deliberate invocation of the existing indexing API with `force=True` or a future supported operation; it should be tested on synthetic data first. Removed source PDFs cannot be re-OCRed unless restored.
+Older workbook/index utilities may retain file-backed caches. These are separate from the current app; do not open untrusted pickle files or erase old state without checking its purpose.
 
-Before shared deployment, define approved retention for incoming PDFs, previews, extracted PDFs, caches, final outputs, and backups. Source deletion alone does not remove derived copies.
+## Validation
 
-## Validation and release
-
-Run `python -m pytest -q` after behavior changes. Review environment-variable additions against `.env.example` and `docs/configuration.md`. Test real Entra sign-in, callback failure, sign-out, and a synthetic Azure OCR call before shared use. Record the tested revision and environment without recording secrets.
-
-Review [PRP.md](../PRP.md) for unresolved dependency locking, vulnerability/license checks, and publication rights. Current docs do not establish production readiness.
+Run the checks in the README after changes. Automated tests use generated PDFs and mocked Azure responses. They do not establish live provider connectivity or production readiness. Review logs for paths, identifiers and credentials before sharing them.

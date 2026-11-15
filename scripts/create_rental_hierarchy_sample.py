@@ -1,4 +1,4 @@
-"""Create complete OD/RO/SO packets with realistic identifier crop misses."""
+"""Create complete OD/RO/SO packets, with crop-miss or all-correct profiles."""
 from dataclasses import asdict, replace
 import argparse
 import hashlib
@@ -23,7 +23,7 @@ def _canonical_manifest_paths(manifest):
     return manifest
 
 
-def create(root, rasterize=True, batch_number=1, output_name=None):
+def create(root, rasterize=True, batch_number=1, output_name=None, clean=False):
     scans = root / 'Scans'
     incoming = scans / 'incomming_scan'
     incoming.mkdir(parents=True, exist_ok=True)
@@ -39,16 +39,17 @@ def create(root, rasterize=True, batch_number=1, output_name=None):
             path = Path(scratch) / f'{ticket.order_id}.pdf'
             # Every page and number exists. Only the OD line moves, so RO/SO
             # cannot silently substitute for an unreadable order in the crop.
-            offsets = {1: 64} if index == 2 else {6: 72} if index == 5 else {}
+            offsets = {} if clean else {1: 64} if index == 2 else {6: 72} if index == 5 else {}
             metadata = write_ticket_pdf(path, ticket, rasterize, order_offsets=offsets)
             case = 'order_number_outside_crop' if offsets else 'good'
             record = json.loads(json.dumps(asdict(ticket), default=str))
             record.update(rental_order=ticket.rental_order, test_case=case, sample_role='batch',
+                          sample_profile='all_correct' if clean else 'crop_misses',
                           shifted_order_pages=list(offsets), pages=[])
             records.append(record)
             sequence.extend((index, n, path, page) for n, page in enumerate(metadata))
         random.Random(915 + batch_number).shuffle(sequence)
-        output = incoming / (output_name or 'rental_orders_RO_OD_SO_shuffled.pdf')
+        output = incoming / (output_name or (f'batch_{batch_number:02d}_ALL_CORRECT_8_orders.pdf' if clean else 'rental_orders_RO_OD_SO_shuffled.pdf'))
         with fitz.open() as combined:
             for number, (index, page_number, path, metadata) in enumerate(sequence, 1):
                 with fitz.open(path) as pdf:
@@ -65,11 +66,13 @@ def create(root, rasterize=True, batch_number=1, output_name=None):
         generator='ocr-synthetic-demo-v1', synthetic=True, tickets=[])
     _canonical_manifest_paths(manifest)
     manifest['tickets'] = [t for t in manifest['tickets'] if t.get('pdf') != output.relative_to(scans).as_posix()] + records
-    manifest['count'] = len(manifest['tickets'])
+    manifest['count'] = len({record['order_id'] for record in manifest['tickets']})
     sample = output.relative_to(scans).as_posix()
     manifest['batches'] = [b for b in manifest.get('batches', []) if b['pdf'] != sample] + [dict(pdf=sample, pages=len(sequence))]
     manifest['batch_count'] = len(manifest['batches'])
     manifest['total_pages'] = sum(b['pages'] for b in manifest['batches'])
+    if clean:
+        manifest.update(recommended_pdf=sample, clean_batch_pdf=sample)
     temporary_manifest = manifest_path.with_suffix('.part')
     temporary_manifest.write_text(json.dumps(manifest, indent=2) + '\n')
     temporary_manifest.replace(manifest_path)
@@ -138,11 +141,18 @@ def create_batches(root, rasterize=True):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--all-batches', action='store_true')
+    parser.add_argument('--clean', action='store_true', help='Keep every identifier inside the crop; no intentional failures')
+    parser.add_argument('--batch-number', type=int, help='Distinct numbered batch (default 10 for --clean, otherwise 1)')
     args = parser.parse_args()
+    if args.all_batches and (args.clean or args.batch_number is not None):
+        parser.error('--all-batches cannot be combined with --clean or --batch-number')
+    batch_number = args.batch_number if args.batch_number is not None else 10 if args.clean else 1
+    if batch_number < 1:
+        parser.error('--batch-number must be positive')
     root = Path(__file__).resolve().parents[1]
     if args.all_batches:
         _, backup = create_batches(root)
         print(f'8 batches, 64 OD orders, 16 ROs, 32 SO shipments, 384 pages; prior templates backed up in {backup}. Live workspace untouched.')
     else:
-        output, records, _ = create(root)
+        output, records, _ = create(root, batch_number=batch_number, clean=args.clean)
         print(f'{output}: 2 ROs, 8 OD orders, 4 SO shipments, 48 shuffled pages. No rows preloaded.')

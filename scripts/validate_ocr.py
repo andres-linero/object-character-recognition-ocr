@@ -20,9 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from dotenv import dotenv_values
 from sqlalchemy import select
-from ADK_Agentic import storage as db
-from ADK_Agentic.etl import checksum, ingest_tracker, upsert
-from ADK_Agentic.processing import process_page, register_pdf
+from ocr_workspace import storage as db
+from ocr_workspace.etl import checksum, ingest_tracker, upsert
+from ocr_workspace.processing import process_page, register_pdf
 
 INPUT = ROOT / "demo_batches/ocr_validation/incoming_scans"
 RUNTIME = ROOT / "demo_runtime"

@@ -1,4 +1,4 @@
-from ADK_Agentic.ticket_names import ticket_filename
+from ocr_workspace.ticket_names import ticket_filename
 
 
 def test_customer_facing_filename_contains_all_four_fields_and_no_batch_or_demo_prefix():

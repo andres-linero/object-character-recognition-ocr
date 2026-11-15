@@ -25,7 +25,7 @@ The parser reads the shipment/work-order identifier from the page header. Custom
 
 ## Scope and checks
 
-This is a localhost synthetic workspace; it does not replace production authentication. Unknown PDFs are deliberately skipped and never silently relabeled synthetic. The legacy signed-in Streamlit interface and office repository are unchanged. Full-page unknown-document extraction, authentication for private scans, durable distributed job leasing, and an explicit failed-page retry UI remain future work.
+This is a localhost synthetic workspace; it does not replace production authentication. Unknown PDFs are deliberately skipped and never silently relabeled synthetic. The former Streamlit interfaces have been removed; use the FastAPI web interface. Full-page unknown-document extraction, authentication for private scans, durable distributed job leasing, and an explicit failed-page retry UI remain future work.
 
 Local tests cover stable-copy detection, outside samples remaining unprocessed, per-page matching, immutable snapshots, no duplicate provider calls on watcher restart, unknown-file rejection, API source boundaries, restored tabs, file counts, and ticket drawers. Azure is mocked in regression tests. The earlier three-PDF manual live test matched 18/18 pages; those results are retained in the archived fixture database, not preloaded into the live intake.
 

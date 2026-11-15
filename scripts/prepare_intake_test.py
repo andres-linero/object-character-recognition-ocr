@@ -8,9 +8,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import dotenv_values
 from sqlalchemy import select
-from ADK_Agentic import storage as db
-from ADK_Agentic.etl import ingest_tracker, register_manifest
-from ADK_Agentic.processing import process_page
+from ocr_workspace import storage as db
+from ocr_workspace.etl import ingest_tracker, register_manifest
+from ocr_workspace.processing import process_page
 
 ROOT = Path(__file__).resolve().parents[1]
 

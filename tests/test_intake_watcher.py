@@ -5,9 +5,9 @@ import pytest
 from pathlib import Path
 
 from sqlalchemy import select
-from ADK_Agentic import storage as db
-from ADK_Agentic.etl import ingest_tracker, checksum
-from ADK_Agentic.intake_watcher import IntakeWatcher
+from ocr_workspace import storage as db
+from ocr_workspace.etl import ingest_tracker, checksum
+from ocr_workspace.intake_watcher import IntakeWatcher
 from scripts.create_demo_data import generate_dataset
 
 
@@ -75,7 +75,7 @@ def test_demo_watcher_does_not_submit_unknown_files(tmp_path):
 
 @pytest.mark.parametrize('failure', ['no_match', 'pdf_error'])
 def test_progress_cannot_announce_ready_for_unmatched_pages_or_failed_pdf(tmp_path, monkeypatch, failure):
-    from ADK_Agentic import intake_watcher
+    from ocr_workspace import intake_watcher
     outside = tmp_path / 'samples'
     manifest = generate_dataset(outside, count=1, min_pages=6, max_pages=6, rasterize=False)
     pdf = outside / manifest['tickets'][0]['pdf']
@@ -106,7 +106,7 @@ def test_progress_cannot_announce_ready_for_unmatched_pages_or_failed_pdf(tmp_pa
 
 
 def test_generated_manifest_recognizes_sample_moved_before_app_starts(tmp_path):
-    from ADK_Agentic.intake_watcher import known_demo_hashes
+    from ocr_workspace.intake_watcher import known_demo_hashes
     dataset = tmp_path / 'demo_data'
     manifest = generate_dataset(dataset, count=1, min_pages=6, max_pages=6, rasterize=False)
     sample = dataset / manifest['tickets'][0]['pdf']
@@ -118,7 +118,7 @@ def test_generated_manifest_recognizes_sample_moved_before_app_starts(tmp_path):
 
 
 def test_replacing_sample_file_does_not_expand_the_recorded_allowlist(tmp_path):
-    from ADK_Agentic.intake_watcher import known_demo_hashes
+    from ocr_workspace.intake_watcher import known_demo_hashes
     dataset = tmp_path / 'demo_data'
     manifest = generate_dataset(dataset, count=1, min_pages=6, max_pages=6, rasterize=False)
     sample = dataset / manifest['tickets'][0]['pdf']
@@ -133,7 +133,7 @@ def test_replacing_sample_file_does_not_expand_the_recorded_allowlist(tmp_path):
 def test_worker_waits_for_old_live_connection_to_release_lock(tmp_path, monkeypatch):
     import errno
     import threading
-    from ADK_Agentic import intake_watcher
+    from ocr_workspace import intake_watcher
     attempts = []
     def lock_after_restart(lock):
         attempts.append(1)

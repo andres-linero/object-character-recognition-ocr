@@ -10,8 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.schema import CreateTable
 from sqlalchemy.dialects import postgresql
 
-from ADK_Agentic import etl, storage as db
-from ADK_Agentic.processing import process_batch, register_pdf
+from ocr_workspace import etl, storage as db
+from ocr_workspace.processing import process_batch, register_pdf
 from scripts import create_demo_data as demo
 
 
@@ -137,8 +137,8 @@ def test_postgres_ddl_has_explicit_schema_and_constraints():
 
 
 def test_ocr_keeps_overlapping_shipment_and_work_order_namespaces_separate(store, tmp_path):
-    from ADK_Agentic.ocr import ParsedIdentifier
-    from ADK_Agentic.processing import process_page
+    from ocr_workspace.ocr import ParsedIdentifier
+    from ocr_workspace.processing import process_page
     rows = [dict(Order_ID="W-900001", SO="800001", Customer_name="Demo", Status="OPEN"),
             dict(Order_ID="800001", SO="800002", Customer_name="Demo", Status="OPEN")]
     etl.ingest_tracker(store, tracker(tmp_path / "orders.csv", rows))
