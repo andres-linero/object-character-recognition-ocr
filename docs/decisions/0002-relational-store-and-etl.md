@@ -1,5 +1,7 @@
 # ADR 0002: Use PostgreSQL for application data and retain Excel at the boundary
 
+> Historical decision record. The Streamlit interfaces have since been removed; see [current architecture](../architecture.md).
+
 Status: Accepted direction; initial implementation on feature branch
 
 Date: 2026-11-06
@@ -88,7 +90,7 @@ OCR processing should record page-level success, no-match, or error independentl
 
 ## Documentation and professional language
 
-Use the conventional term **Optical Character Recognition**. Prefer user-facing names such as **Order Reconciliation**, **Document Processing**, **Review Queue**, and **Processing History**. Document implemented behavior separately from proposals. Rename the legacy `ADK_Agentic` package only in a scoped refactor that updates imports, startup commands, tests, and documentation together.
+Use the conventional term **Optical Character Recognition**. Prefer user-facing names such as **Order Reconciliation**, **Document Processing**, **Review Queue**, and **Processing History**. Document implemented behavior separately from proposals. The former agent-named package is now `ocr_workspace`; imports, startup commands, tests, and documentation use this name.
 
 Keep changes on feature branches with pull requests. Do not push development changes directly to `main`.
 

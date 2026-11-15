@@ -69,6 +69,18 @@ def test_missing_credentials_raises(monkeypatch):
         ocr.extract_order_number(b"unused", crop_header=False)
 
 
+def test_single_response_keeps_order_ticket_and_shipment_in_separate_namespaces():
+    result = ocr.parse_identifier('Rental Order No. RO-810001 Customer Order No. CO-123456 Ticket No. TK-992001 Shipment No. 904001')
+    assert result.identifiers == {'rental_order': 'RO-810001', 'customer_order': 'CO-123456', 'work_order': 'TK-992001', 'shipment': '904001'}
+    assert result.kind == 'rental_order'
+    assert ocr.parse_identifier('Customer Order No. 904001').kind == 'customer_order'
+    assert ocr.parse_identifier('Shipment No. 904001').kind == 'shipment'
+    assert ocr.parse_identifier('Work Order No. 904001').kind == 'work_order'
+    agreement = ocr.parse_identifier('Rental Agreement No. RA-701062 Work Order No. W-991062 Shipment No. 901062')
+    assert agreement.kind == 'rental_order' and agreement.value == 'RO-701062'
+    assert agreement.identifiers['rental_order'] == 'RO-701062'
+
+
 @pytest.mark.parametrize("case", json.loads(
     (Path(__file__).parent / "fixtures/ocr_golden.json").read_text()),
     ids=lambda case: case["name"])

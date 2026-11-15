@@ -4,8 +4,8 @@ import json
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ADK_Agentic.storage import Store, sqlite_url
-from ADK_Agentic.etl import ingest_tracker, register_manifest
+from ocr_workspace.storage import Store, sqlite_url
+from ocr_workspace.etl import ingest_tracker, register_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 DATABASE = ROOT / "demo_runtime" / "demo.sqlite"

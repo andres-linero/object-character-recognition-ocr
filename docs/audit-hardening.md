@@ -18,7 +18,7 @@ Before CI: 71 Python tests passed locally on macOS/Python 3.13, with eight skips
 | #21 lock and updates | `uv.lock` locks Python resolution; npm already has a lock. CI uses frozen installs. Dependabot covers uv, npm, and Actions. Convenience requirements files are not frozen exports. |
 | #22 secrets | `.env.example` documents names without credentials. Gitleaks scans fetched history with redacted output. Actual `.env` remains ignored and local. |
 | #23 inherited customer files | Original history was never imported. No listed data/secret filenames were found in this copy's history. Office history exposure remains a separate task. |
-| #24 synchronous/concurrent OCR | Open. The primary synthetic UI does not start cloud indexing on reruns. CLI attempts/retries are persisted, but atomic job claiming, worker leasing, and multi-process duplicate-call protection are still needed. Legacy Streamlit retains synchronous indexing. |
+| #24 synchronous/concurrent OCR | Open. The primary synthetic UI does not start cloud indexing on reruns. CLI attempts/retries are persisted, but atomic job claiming, worker leasing, and multi-process duplicate-call protection are still needed. The legacy Streamlit interfaces have since been removed; the current local intake worker uses a process lock. |
 | #25 golden corpus | Added 18 text cases covering label variants, typed identifiers, postal/year/customer noise, fragments, and overlong IDs. No Azure needed. |
 | #26 application tests | Existing legacy preview/SSO-gate tests and API/DOM tests pass. Authenticated tenant callback coverage is still missing. |
 | #27 quoted Excel reload | Fixed shared path normalization and full path/size/nanosecond-time signature comparison. Regression test added. |

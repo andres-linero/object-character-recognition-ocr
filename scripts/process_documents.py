@@ -7,8 +7,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv
-from ADK_Agentic.storage import Store
-from ADK_Agentic.processing import process_batch
+from ocr_workspace.storage import Store
+from ocr_workspace.processing import process_batch
 
 
 def main():

@@ -1,4 +1,4 @@
--r ADK_Agentic/requirements.txt
+-r requirements.txt
 pytest>=8.0.0
 -r requirements-data.txt
 -r requirements-web.txt

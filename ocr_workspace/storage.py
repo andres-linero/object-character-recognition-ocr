@@ -8,7 +8,7 @@ from uuid import uuid4
 from sqlalchemy import (Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey,
                         Integer, JSON, MetaData, String, Table, Text, UniqueConstraint,
                         create_engine, event, func, select)
-from sqlalchemy.schema import CreateSchema
+from sqlalchemy.schema import CreateSchema, CreateTable
 from sqlalchemy.pool import StaticPool
 
 metadata = MetaData()
@@ -66,7 +66,6 @@ orders = Table("orders", metadata, identity(),
     Column("expected_pages", Integer), Column("source_sheet", String(100), nullable=False),
     Column("source_id", ForeignKey("staging.source_files.id"), nullable=False),
     UniqueConstraint("source_system", "order_number"),
-    UniqueConstraint("source_system", "shipment_number"),
     CheckConstraint("status IN ('OPEN','COMPLETE')"),
     CheckConstraint("expected_pages IS NULL OR expected_pages > 0"), schema="core")
 documents = Table("documents", metadata, identity(),
@@ -98,6 +97,42 @@ reviews = Table("review_events", metadata, identity(),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("status", String(20), nullable=False),
     CheckConstraint("status IN ('pending','reviewed')"), schema="ops")
+page_approvals = Table("manual_page_approvals", metadata, identity(),
+    Column("order_id", ForeignKey("core.orders.id"), nullable=False),
+    Column("page_id", ForeignKey("core.document_pages.id"), nullable=False, unique=True),
+    Column("printed_page", Integer, nullable=False),
+    Column("attempt_id", ForeignKey("ops.ocr_attempts.id"), nullable=False),
+    Column("approved_at", DateTime(timezone=True), nullable=False),
+    Column("approved_by", String(80), nullable=False),
+    Column("note", Text, nullable=False),
+    UniqueConstraint("order_id", "printed_page"),
+    CheckConstraint("printed_page > 0"), schema="ops")
+rental_orders = Table("rental_orders", metadata, identity(),
+    Column("source_system", String(80), nullable=False),
+    Column("rental_number", String(80), nullable=False),
+    Column("customer_id", ForeignKey("core.customers.id"), nullable=False),
+    Column("address", Text, nullable=False),
+    UniqueConstraint("source_system", "customer_id", "rental_number"), schema="core")
+rental_tickets = Table("rental_order_tickets", metadata,
+    Column("order_id", ForeignKey("core.orders.id"), primary_key=True),
+    Column("rental_id", ForeignKey("core.rental_orders.id"), nullable=False), schema="core")
+rental_pages = Table("rental_order_pages", metadata,
+    Column("page_id", ForeignKey("core.document_pages.id"), primary_key=True),
+    Column("rental_id", ForeignKey("core.rental_orders.id"), nullable=False),
+    Column("attempt_id", ForeignKey("ops.ocr_attempts.id"), nullable=False),
+    Column("fields", JSON, nullable=False), schema="core")
+page_extractions = Table("page_extractions", metadata,
+    Column("page_id", ForeignKey("core.document_pages.id"), primary_key=True),
+    Column("extracted_at", DateTime(timezone=True), nullable=False),
+    Column("method", String(40), nullable=False),
+    Column("fields", JSON, nullable=False), schema="ops")
+downloads = Table("ticket_downloads", metadata, identity(),
+    Column("order_id", ForeignKey("core.orders.id"), nullable=False),
+    Column("version", String(64), nullable=False),
+    Column("downloaded_at", DateTime(timezone=True), nullable=False),
+    Column("kind", String(20), nullable=False),
+    Column("filename", Text, nullable=False),
+    CheckConstraint("kind IN ('pdf','scan_zip','rental_zip','reported')"), schema="ops")
 
 
 class Store:
@@ -120,18 +155,67 @@ class Store:
             raise ValueError("Only PostgreSQL and SQLite are supported")
 
     def migrate(self):
-        """Apply migration 1 once. Future schema changes require a new migration."""
-        with self.engine.begin() as connection:
-            if self.engine.dialect.name == "postgresql":
-                for schema in ("staging", "core", "ops"):
-                    connection.execute(CreateSchema(schema, if_not_exists=True))
-            versions.create(connection, checkfirst=True)
-            current = connection.scalar(select(func.max(versions.c.version))) or 0
-            if current > 1:
-                raise ValueError("Database schema is newer than this application")
-            if current == 0:
-                metadata.create_all(connection)
-                connection.execute(versions.insert().values(version=1, applied_at=utcnow()))
+        """Apply versioned migrations without replacing existing document evidence."""
+        with self.engine.connect() as connection:
+            sqlite = self.engine.dialect.name == 'sqlite'
+            if sqlite:
+                connection.exec_driver_sql('PRAGMA foreign_keys=OFF')
+                connection.commit()
+            try:
+                with connection.begin():
+                    if sqlite:
+                        connection.exec_driver_sql('BEGIN IMMEDIATE')
+                    else:
+                        for schema in ("staging", "core", "ops"):
+                            connection.execute(CreateSchema(schema, if_not_exists=True))
+                    versions.create(connection, checkfirst=True)
+                    current = connection.scalar(select(func.max(versions.c.version))) or 0
+                    if current > 5:
+                        raise ValueError("Database schema is newer than this application")
+                    if current == 0:
+                        metadata.create_all(connection)
+                        connection.execute(versions.insert().values(version=1, applied_at=utcnow()))
+                    if current < 2:
+                        page_approvals.create(connection, checkfirst=True)
+                        connection.execute(versions.insert().values(version=2, applied_at=utcnow()))
+                    if current < 3:
+                        for table in (rental_orders, rental_tickets, rental_pages):
+                            table.create(connection, checkfirst=True)
+                        if current and sqlite:
+                            # Rebuild only orders to remove the obsolete one-shipment/one-ticket rule.
+                            unique_shipments = False
+                            for index in connection.exec_driver_sql('PRAGMA index_list(orders)').mappings():
+                                if index['unique']:
+                                    columns = [r[2] for r in connection.exec_driver_sql(f'PRAGMA index_info("{index["name"]}")')]
+                                    unique_shipments |= columns == ['source_system', 'shipment_number']
+                            if unique_shipments:
+                                ddl = str(CreateTable(orders).compile(dialect=connection.dialect,
+                                    schema_translate_map={'core': None, 'ops': None, 'staging': None}, render_schema_translate=True))
+                                ddl = ddl.replace('CREATE TABLE main.orders', 'CREATE TABLE orders_next', 1)
+                                connection.exec_driver_sql(ddl)
+                                columns = ', '.join(f'"{column.name}"' for column in orders.columns)
+                                connection.exec_driver_sql(f'INSERT INTO orders_next ({columns}) SELECT {columns} FROM orders')
+                                connection.exec_driver_sql('DROP TABLE orders')
+                                connection.exec_driver_sql('ALTER TABLE orders_next RENAME TO orders')
+                        elif current:
+                            from sqlalchemy import inspect
+                            for constraint in inspect(connection).get_unique_constraints('orders', schema='core'):
+                                if constraint['column_names'] == ['source_system', 'shipment_number']:
+                                    quoted = connection.dialect.identifier_preparer.quote(constraint['name'])
+                                    connection.exec_driver_sql(f'ALTER TABLE core.orders DROP CONSTRAINT {quoted}')
+                        connection.execute(versions.insert().values(version=3, applied_at=utcnow()))
+                    if current < 4:
+                        page_extractions.create(connection, checkfirst=True)
+                        connection.execute(versions.insert().values(version=4, applied_at=utcnow()))
+                    if current < 5:
+                        downloads.create(connection, checkfirst=True)
+                        connection.execute(versions.insert().values(version=5, applied_at=utcnow()))
+                    if sqlite and connection.exec_driver_sql('PRAGMA foreign_key_check').all():
+                        raise ValueError('Migration would break existing document references')
+            finally:
+                if sqlite:
+                    connection.exec_driver_sql('PRAGMA foreign_keys=ON')
+                    connection.commit()
 
     def rows(self, statement):
         with self.engine.connect() as connection:

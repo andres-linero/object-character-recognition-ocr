@@ -1,5 +1,7 @@
 # ADR 0001: Separate application responsibilities within one deployable app
 
+> Historical decision record. The Streamlit interfaces have since been removed; see [current architecture](../architecture.md).
+
 Status: Proposed
 
 Date: 2026-11-06

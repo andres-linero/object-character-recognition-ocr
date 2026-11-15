@@ -35,5 +35,3 @@ select = ["E4", "E7", "E9", "F"]
 [tool.ruff.lint.per-file-ignores]
 # Entrypoints bootstrap the repo path/configuration before application imports.
 "scripts/*.py" = ["E402"]
-"ADK_Agentic/streamlit_app.py" = ["E402"]
-"ADK_Agentic/demo_app.py" = ["E402"]

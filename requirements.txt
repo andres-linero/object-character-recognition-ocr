@@ -1,4 +1,4 @@
-# Product UI and SQL pipeline. Streamlit is retained only in the legacy/dev stack.
+# Product UI and SQL pipeline.
 -r requirements-web.txt
 python-dotenv>=1.0
 pillow>=10.0

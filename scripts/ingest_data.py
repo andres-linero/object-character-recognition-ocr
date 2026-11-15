@@ -7,9 +7,9 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv
-from ADK_Agentic.storage import Store
-from ADK_Agentic.etl import ingest_tracker, register_manifest
-from ADK_Agentic.processing import register_pdf
+from ocr_workspace.storage import Store
+from ocr_workspace.etl import ingest_tracker, register_manifest
+from ocr_workspace.processing import register_pdf
 
 
 def main():
