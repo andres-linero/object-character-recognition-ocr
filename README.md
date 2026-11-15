@@ -31,7 +31,7 @@ This is a separate public copy of my original application. It uses fictional rec
 
 | Full scan ready | Scan with flags |
 | --- | --- |
-| ![Completed scan with all eight orders ready and no unresolved pages](docs/media/order-scanner/scan-ready.png) | ![Completed processing with six orders ready and two orders flagged for review](docs/media/order-scanner/scan-with-flags.png) |
+| ![Completed scan with all eight orders ready and no unresolved pages](docs/media/order-scanner/scan-ready-panels.png) | ![Completed processing with six orders ready and two orders flagged for review](docs/media/order-scanner/scan-with-flags-panels.png) |
 | **8 orders ready · 0 pages to resolve** | **6 orders ready · 2 orders in review** |
 
 | Step | What happens |
@@ -43,37 +43,17 @@ This is a separate public copy of my original application. It uses fictional rec
 
 The browser has five views: **Overview**, **Dataset**, **OCR activity**, **Flags**, and **Ingestion history**. A complete order can be downloaded while other orders still need review.
 
-### Watch the application
+### Review a ticket
 
-These silent excerpts use synthetic documents. Waiting time has been removed; processing clips jump between stages and play the retained moments at normal speed.
-
-#### A complete scan
-
-Upload a sample, follow OCR progress, and finish with **8 orders ready and no unresolved pages**.
-
-The animated demo at the top shows this complete path.
-
-[Watch the 17-second MP4](docs/media/order-scanner/ocr-complete.mp4)
-
-#### Exceptions stay visible
-
-A second scan finishes with **6 orders ready and 2 still in review**. Ready orders remain available for download while uncertain pages are flagged.
-
-![Edited recording of processing that ends with six ready orders and two flagged orders](docs/media/order-scanner/ocr-with-flags.gif)
-
-[Watch the 20-second MP4](docs/media/order-scanner/ocr-with-flags.mp4)
-
-#### Review the original page and repair its assignment
-
-Open Flags, compare a candidate's extracted fields and original image with the target order, then link the matching image to its missing printed-page slot. The recording shows one repaired order; another flagged order remains.
+Open Flags, compare a candidate's extracted fields and original image with the target order, then link the matching image to its missing printed-page slot. This edited excerpt shows one repaired order; another flagged order remains.
 
 ![Edited recording of field comparison, page assignment and an order becoming ready](docs/media/order-scanner/review-and-repair.gif)
 
 [Watch the 27-second MP4](docs/media/order-scanner/review-and-repair.mp4)
 
-#### Download organized order packets
+### Output: organized order packets
 
-The ZIP action records the download and offers **Download again**. Extracted files are organized into rental-order folders containing compiled order PDFs.
+After review, download the ready orders as a ZIP. The app records the download and offers **Download again**. Extracted files are organized into rental-order folders containing compiled order PDFs.
 
 ![Recording of downloading the completed scan ZIP](docs/media/order-scanner/zip-download.gif)
 
