@@ -29,7 +29,10 @@ This is a separate public copy of my original application. It uses fictional rec
 
 ## See the workflow
 
-![Order Scanner overview showing processed pages, ready orders and two pages awaiting review](docs/media/order-scanner/overview.png)
+| Full scan ready | Scan with flags |
+| --- | --- |
+| ![Completed scan with all eight orders ready and no unresolved pages](docs/media/order-scanner/scan-ready.png) | ![Completed processing with six orders ready and two orders flagged for review](docs/media/order-scanner/scan-with-flags.png) |
+| **8 orders ready · 0 pages to resolve** | **6 orders ready · 2 orders in review** |
 
 | Step | What happens |
 | --- | --- |
