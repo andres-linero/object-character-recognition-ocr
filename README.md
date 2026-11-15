@@ -19,19 +19,13 @@ Order Scanner automates document reading, order matching, completeness checks, a
 
 ## Why I built it
 
-I identified an operational bottleneck: processing order documents manually took around five hours, alongside staff's other responsibilities. Reading identifiers, matching pages to orders, checking for missing documents, and assembling complete packets added to an already heavy workload.
+I identified an operational bottleneck: processing order documents manually took around five hours, alongside staff's other responsibilities. I designed and built Order Scanner to reduce that work and let staff focus on exceptions that need judgment.
 
-I designed and built the application to reduce that manual effort and let staff focus on exceptions that need judgment.
+- **Started with Google ADK** to explore an agent-based solution.
+- **Shifted to an OCR workflow with Streamlit** for document extraction and order processing.
+- **Adapted the application into this public version** with FastAPI, JavaScript, SQL-backed processing, visual review, and download history.
 
-## How the project evolved
-
-I built the project from the initial exploration through the current application:
-
-1. **Agent exploration with Google ADK:** explored an agent-based approach to the workflow.
-2. **OCR workflow with Streamlit:** shifted to document extraction and order processing, with Streamlit providing the interface.
-3. **Public Order Scanner version:** adapted my original application into this separate repository, using synthetic documents and a FastAPI/JavaScript interface with SQL-backed processing, visual review, and download history.
-
-This repository is a separate public copy of my original application, adapted to demonstrate the workflow while protecting company information. It uses fictional records and generated documents in place of operational data; company data and credentials are excluded. Google ADK and Streamlit describe earlier stages and are not dependencies of the current application.
+This is a separate public copy of my original application. It uses fictional records and generated documents to protect company information; operational data and credentials are excluded. Google ADK and Streamlit belong to earlier stages and are not current dependencies.
 
 ## See the workflow
 
