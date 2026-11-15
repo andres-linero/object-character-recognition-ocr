@@ -1,8 +1,15 @@
-# Order Scanner
+<h1><img src="docs/media/order-scanner/logo.svg" alt="" width="42" height="46"> Order Scanner</h1>
+
+![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-1d6457)
+![Python 3.12 and 3.13](https://img.shields.io/badge/Python-3.12%20%7C%203.13-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Azure Document Intelligence](https://img.shields.io/badge/Azure-Document%20Intelligence-0078D4)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)
 
 **Reduce manual order-document work, review exceptions, and download complete PDF packets.**
 
-Order Scanner automates document reading, order matching, completeness checks, and PDF assembly in one browser workspace. Built with Python, FastAPI, Azure Document Intelligence, and SQLite, it keeps uncertain page matches available for human review.
+Order Scanner automates document reading, order matching, completeness checks, and PDF assembly in one browser workspace. Uncertain page matches stay available for human review.
 
 ![Order Scanner demo: upload a PDF, follow OCR progress and finish with eight complete orders](docs/media/order-scanner/ocr-complete.gif)
 

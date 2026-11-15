@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="52" viewBox="0 0 48 52" role="img" aria-labelledby="title">
+  <title id="title">Order Scanner logo</title>
+  <g transform="rotate(-4 24 26)">
+    <rect x="7" y="7" width="34" height="38" rx="9" fill="#1d6457"/>
+    <g fill="#c9f4e5">
+      <rect x="16" y="19" width="16" height="2" rx="1"/>
+      <rect x="16" y="25" width="12" height="2" rx="1"/>
+      <rect x="16" y="31" width="7.2" height="2" rx="1"/>
+    </g>
+  </g>
+</svg>
