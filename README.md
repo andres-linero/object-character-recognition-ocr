@@ -1,16 +1,34 @@
 # Order Scanner
 
-**Turn shuffled rental-document scans into organized orders, review exceptions, and download complete PDF packets.**
+**Reduce manual order-document work, review exceptions, and download complete PDF packets.**
 
-Order Scanner is a document-processing application built with Python, FastAPI, Azure Document Intelligence, and SQLite. It reads uploaded PDFs, groups pages by rental order and work order, checks printed-page completeness, and provides a visual review workflow for uncertain matches.
+Order Scanner automates document reading, order matching, completeness checks, and PDF assembly in one browser workspace. Built with Python, FastAPI, Azure Document Intelligence, and SQLite, it keeps uncertain page matches available for human review.
 
-## The problem
+![Order Scanner demo: upload a PDF, follow OCR progress and finish with eight complete orders](docs/media/order-scanner/ocr-complete.gif)
 
-A scanned PDF can contain pages from several rental orders in no useful sequence. An operator needs to identify which pages belong together, distinguish order numbers from shipment numbers, find incomplete packets, and assemble the right documents for download.
+**Upload → Process → Review → Download** · [Watch the MP4](docs/media/order-scanner/ocr-complete.mp4)
 
-This project brings extraction, reconciliation, review, and PDF assembly into one browser workspace. The tracker starts empty: uploaded documents create its rows.
+*An edited 17-second demo using synthetic documents; waiting time is omitted.*
+
+## Why I built it
+
+I identified an operational bottleneck: processing order documents manually took around five hours, alongside staff's other responsibilities. Reading identifiers, matching pages to orders, checking for missing documents, and assembling complete packets added to an already heavy workload.
+
+I designed and built the application to reduce that manual effort and let staff focus on exceptions that need judgment.
+
+## How the project evolved
+
+I built the project from the initial exploration through the current application:
+
+1. **Agent exploration with Google ADK:** explored an agent-based approach to the workflow.
+2. **OCR workflow with Streamlit:** shifted to document extraction and order processing, with Streamlit providing the interface.
+3. **Public Order Scanner version:** adapted my original application into this separate repository, using synthetic documents and a FastAPI/JavaScript interface with SQL-backed processing, visual review, and download history.
+
+This repository is a separate public copy of my original application, adapted to demonstrate the workflow while protecting company information. It uses fictional records and generated documents in place of operational data; company data and credentials are excluded. Google ADK and Streamlit describe earlier stages and are not dependencies of the current application.
 
 ## See the workflow
+
+![Order Scanner overview showing processed pages, ready orders and two pages awaiting review](docs/media/order-scanner/overview.png)
 
 | Step | What happens |
 | --- | --- |
@@ -20,6 +38,55 @@ This project brings extraction, reconciliation, review, and PDF assembly into on
 | **Download** | Download complete orders as PDFs or collect ready orders from a scan in a ZIP. |
 
 The browser has five views: **Overview**, **Dataset**, **OCR activity**, **Flags**, and **Ingestion history**. A complete order can be downloaded while other orders still need review.
+
+### Watch the application
+
+These silent excerpts use synthetic documents. Waiting time has been removed; processing clips jump between stages and play the retained moments at normal speed.
+
+#### A complete scan
+
+Upload a sample, follow OCR progress, and finish with **8 orders ready and no unresolved pages**.
+
+The animated demo at the top shows this complete path.
+
+[Watch the 17-second MP4](docs/media/order-scanner/ocr-complete.mp4)
+
+#### Exceptions stay visible
+
+A second scan finishes with **6 orders ready and 2 still in review**. Ready orders remain available for download while uncertain pages are flagged.
+
+![Edited recording of processing that ends with six ready orders and two flagged orders](docs/media/order-scanner/ocr-with-flags.gif)
+
+[Watch the 20-second MP4](docs/media/order-scanner/ocr-with-flags.mp4)
+
+#### Review the original page and repair its assignment
+
+Open Flags, compare a candidate's extracted fields and original image with the target order, then link the matching image to its missing printed-page slot. The recording shows one repaired order; another flagged order remains.
+
+![Edited recording of field comparison, page assignment and an order becoming ready](docs/media/order-scanner/review-and-repair.gif)
+
+[Watch the 27-second MP4](docs/media/order-scanner/review-and-repair.mp4)
+
+#### Download organized order packets
+
+The ZIP action records the download and offers **Download again**. Extracted files are organized into rental-order folders containing compiled order PDFs.
+
+![Recording of downloading the completed scan ZIP](docs/media/order-scanner/zip-download.gif)
+
+[Watch the ZIP download MP4](docs/media/order-scanner/zip-download.mp4)
+
+| Rental-order folders | Compiled order PDFs |
+| --- | --- |
+| ![Two extracted rental-order folders](docs/media/order-scanner/rental-order-folders.png) | ![Four compiled order PDFs inside a rental-order folder](docs/media/order-scanner/compiled-order-files.png) |
+
+<details>
+<summary>More screenshots: order tracker and ZIP readiness</summary>
+
+![Order tracker with document-derived order rows and PDF downloads](docs/media/order-scanner/order-tracker.png)
+
+![ZIP summary distinguishing six ready orders, two not ready and two pages to resolve](docs/media/order-scanner/zip-summary.png)
+
+</details>
 
 ### A reproducible demo
 

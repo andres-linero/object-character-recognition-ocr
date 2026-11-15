@@ -1,6 +1,12 @@
 # Walkthrough videos
 
-The README includes two short, silent GIF clips derived from the supplied recordings. GIFs render inline without an external video host. Only the edited clips are committed; the source MP4s and temporary review frames remain local.
+## Current Order Scanner demo
+
+The root [README](../README.md) now includes screenshots and short recordings of the current interface: complete OCR processing, flagged results, visual page repair and ZIP downloads. See the [media notes](media/order-scanner/README.md) for clip lengths and source intervals. These silent excerpts omit waiting time and use synthetic documents.
+
+## Historical recordings
+
+The earlier interface was documented with two short, silent GIF clips derived from supplied recordings. GIFs render inline without an external video host. Only the edited clips are committed; the source MP4s and temporary review frames remain local.
 
 ## Published clips
 

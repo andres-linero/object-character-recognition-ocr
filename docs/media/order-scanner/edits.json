@@ -1,0 +1,82 @@
+[
+  {
+    "name": "ocr-complete",
+    "source": "Screen Recording 2026-11-15 at 1.08.49\u202fPM.mov",
+    "source_archive": "docs/media/source-recordings/ocr-complete-original.mov",
+    "segments_seconds": [
+      [
+        2,
+        9
+      ],
+      [
+        65,
+        68
+      ],
+      [
+        140,
+        147
+      ]
+    ],
+    "edited_duration_seconds": 17,
+    "audio": false
+  },
+  {
+    "name": "zip-download",
+    "source": "Screen Recording 2026-11-15 at 1.16.28\u202fPM.mov",
+    "source_archive": "docs/media/source-recordings/zip-download-original.mov",
+    "segments_seconds": [
+      [
+        0.2,
+        5.8
+      ]
+    ],
+    "edited_duration_seconds": 5.6,
+    "audio": false
+  },
+  {
+    "name": "ocr-with-flags",
+    "source": "Screen Recording 2026-11-15 at 1.23.55\u202fPM.mov",
+    "source_archive": "docs/media/source-recordings/ocr-with-flags-original.mov",
+    "segments_seconds": [
+      [
+        2,
+        9
+      ],
+      [
+        100,
+        103
+      ],
+      [
+        144,
+        154
+      ]
+    ],
+    "edited_duration_seconds": 20,
+    "audio": false
+  },
+  {
+    "name": "review-and-repair",
+    "source": "Screen Recording 2026-11-15 at 1.43.27\u202fPM.mov",
+    "source_archive": "docs/media/source-recordings/review-and-repair-original.mov",
+    "segments_seconds": [
+      [
+        3,
+        12
+      ],
+      [
+        19,
+        23
+      ],
+      [
+        28,
+        33
+      ],
+      [
+        37,
+        46
+      ]
+    ],
+    "edited_duration_seconds": 27,
+    "audio": false
+  }
+]

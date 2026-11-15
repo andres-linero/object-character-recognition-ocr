@@ -86,3 +86,6 @@ node_modules/
 *.pfx
 /.aws/
 /.azure/
+
+# Original screen recordings; only edited demo media is published
+/docs/media/source-recordings/
