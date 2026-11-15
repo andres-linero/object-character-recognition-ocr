@@ -5,6 +5,7 @@ Start with the [project README](../README.md) to install and launch the app.
 | Document | Purpose |
 | --- | --- |
 | [Demo workflow](demo-workflow.md) | Current sample cases, review steps and persistence |
+| [Project reference](project-reference.md) | Setup, validation, architecture overview and additional output examples |
 | [Product UI](product-ui.md) | Order Tracker frontend, API, and local startup |
 | [Live OCR validation](ocr-validation-results.md) | Results and limits for the two 60-page synthetic batches |
 | [Database and ETL](data-pipeline.md) | SQL storage, migrations, ingestion, and synthetic preview |
