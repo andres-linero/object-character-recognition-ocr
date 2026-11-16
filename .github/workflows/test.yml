@@ -1,5 +1,8 @@
 name: Test SQL pipeline and application
-on: [pull_request, workflow_dispatch]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -34,6 +37,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - run: npm run check
         working-directory: web
       - run: npm test
         working-directory: web

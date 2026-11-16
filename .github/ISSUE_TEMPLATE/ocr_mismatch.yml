@@ -1,0 +1,39 @@
+name: OCR mismatch
+description: Report an identifier or page-matching error using synthetic evidence.
+title: "OCR mismatch: "
+body:
+  - type: markdown
+    attributes:
+      value: Use generated or sanitized documents only. Never include keys, private customer details or signatures.
+  - type: input
+    id: sample
+    attributes:
+      label: Synthetic sample and source page
+    validations:
+      required: true
+  - type: input
+    id: document
+    attributes:
+      label: Document type and printed page
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected identifiers
+      description: Identify OD, RO and SO separately.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result and sanitized OCR text
+      description: Include the saved error code and relevant synthetic OCR excerpt, if available.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps and environment
+    validations:
+      required: true

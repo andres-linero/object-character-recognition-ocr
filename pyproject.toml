@@ -21,6 +21,7 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = [".", "ocr_workspace"]
 
 [tool.ruff]
 target-version = "py312"

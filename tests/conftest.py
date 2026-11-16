@@ -1,15 +1,6 @@
 import importlib
 import sys
 import types
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-APP_DIR = ROOT / "ocr_workspace"
-
-for path in (ROOT, APP_DIR):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 
 def _install_pil_stub() -> None:
