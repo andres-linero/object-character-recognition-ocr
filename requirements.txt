@@ -1,6 +1,0 @@
-# Product UI and SQL pipeline.
--r requirements-web.txt
-python-dotenv>=1.0
-pillow>=10.0
-azure-ai-documentintelligence>=1.0
-azure-core>=1.30

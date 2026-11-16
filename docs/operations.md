@@ -5,9 +5,8 @@
 Follow the [README](../README.md) to install the locked dependencies and configure Azure OCR. Run:
 
 ```sh
-uv run --locked python scripts/prepare_workspace.py
 uv run --locked python scripts/create_rental_hierarchy_sample.py --all-batches
-sh scripts/run_web.sh
+uv run --locked python -m ocr_workspace
 ```
 
 Open http://127.0.0.1:8700. Select a sample from `Scans/incomming_scan/` and upload it in the browser. Copying a file into the folder does not submit it. Processing uses Azure and may incur charges; sample generation does not.

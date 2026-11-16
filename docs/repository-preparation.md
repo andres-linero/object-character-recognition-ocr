@@ -1,6 +1,6 @@
-> Historical initial-copy report. See [the current hardening audit](docs/audit-hardening.md) for dependency locks, CI, and updated verification.
+> Historical initial-copy report. See [the current hardening audit](audit-hardening.md) for dependency locks, CI, and updated verification.
 
-# PRP — Public repository preparation
+# Public repository preparation
 
 ## Result
 
@@ -34,4 +34,4 @@ Created Object Character Recognition (OCR) from the tracked source snapshot of t
 
 ## Reproduction
 
-Follow README.md from a new Python environment. Install requirements, generate synthetic inputs, and supply your own Azure and Entra configuration. The repository can run independently once those prerequisites are supplied.
+Follow the [current setup guide](project-reference.md#run-locally) from a new Python environment. Install requirements, generate synthetic inputs, and supply your own Azure and Entra configuration. The repository can run independently once those prerequisites are supplied.

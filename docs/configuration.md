@@ -8,7 +8,6 @@ Run from the repository root. Copy `.env.example` to `.env` if no local file exi
 | --- | --- |
 | `AZURE_DOC_INTEL_ENDPOINT` | Azure Document Intelligence endpoint, required for OCR |
 | `AZURE_DOC_INTEL_KEY` | Azure Document Intelligence key, required for OCR |
-| `OCR_PYTHON` | Optional interpreter override for `scripts/run_web.sh` |
 | `OCR_HEADER_NOISE` | Optional form-specific text exclusions, separated by `|` |
 | `OCR_EXCLUDED_NUMBERS` | Optional comma-separated numeric exclusions |
 | `OCR_ALLOW_UNLABELED_FALLBACK` | Legacy ambiguous-number fallback; off by default |

@@ -8,7 +8,7 @@ Excel is retained as an import/export boundary. Database tables hold normalized 
 
 ## Local workspace
 
-Follow the [README](../README.md) to prepare the workspace, generate current PDF samples, and run `sh scripts/run_web.sh`. Open http://127.0.0.1:8700. Uploading a PDF creates order rows through OCR; generating samples does not preload them.
+Follow the [README](../README.md) to prepare the workspace, generate current PDF samples, and run `uv run --locked python -m ocr_workspace`. Open http://127.0.0.1:8700. Uploading a PDF creates order rows through OCR; generating samples does not preload them.
 
 The former Streamlit preview and `run_demo.sh` launcher have been removed. `prepare_demo.py` remains a CLI fixture utility for older generated datasets, separate from the current workspace startup.
 

@@ -15,7 +15,7 @@ Before CI: 71 Python tests passed locally on macOS/Python 3.13, with eight skips
 | #18 CI | Ubuntu/PostgreSQL, Windows, frontend, correctness lint, and history secret scan run on PRs. No production CD target exists. |
 | #19 Ruff/pre-commit | Ruff is pinned, with syntax/import/undefined-name/unused-code rules. Hooks check Ruff, TOML, YAML, and conflict markers. Broader style modernization is deferred. |
 | #20 project metadata | `pyproject.toml` defines Python support, dependencies, development group, pytest and Ruff settings. |
-| #21 lock and updates | `uv.lock` locks Python resolution; npm already has a lock. CI uses frozen installs. Dependabot covers uv, npm, and Actions. Convenience requirements files are not frozen exports. |
+| #21 lock and updates | `uv.lock` locks Python resolution; npm already has a lock. CI uses frozen installs. Dependabot covers uv, npm, and Actions. Python dependency declarations are centralized in `pyproject.toml`; the former requirements files have been removed. |
 | #22 secrets | `.env.example` documents names without credentials. Gitleaks scans fetched history with redacted output. Actual `.env` remains ignored and local. |
 | #23 inherited customer files | Original history was never imported. No listed data/secret filenames were found in this copy's history. Office history exposure remains a separate task. |
 | #24 synchronous/concurrent OCR | Open. The primary synthetic UI does not start cloud indexing on reruns. CLI attempts/retries are persisted, but atomic job claiming, worker leasing, and multi-process duplicate-call protection are still needed. The legacy Streamlit interfaces have since been removed; the current local intake worker uses a process lock. |
@@ -27,7 +27,7 @@ Before CI: 71 Python tests passed locally on macOS/Python 3.13, with eight skips
 | #30 OAuth redirect state | Open/unverified. No tenant credentials were used for integration tests; legacy SSO remains mandatory. Do not treat the synthetic localhost workspace as production authentication. |
 | #31 ID cross-matching | New parser retains shipment/work-order type; SQL matches one corresponding column. Legacy index no longer aliases bare numbers to W-prefixed IDs. A two-order numeric collision regression runs on SQLite and PostgreSQL. Unlabeled numeric fallback is now opt-in. |
 | #32 dead code/logging | Removed correctness-lint findings; broader dead-method removal, structured logging, and legacy decomposition remain open. |
-| #33 documentation | README now describes locks and actual CI. Updated stale empty-state guidance. This report supersedes initial validation/dependency status in `PRP.md`. Other legacy architecture cleanup remains incremental. |
+| #33 documentation | README now describes locks and actual CI. Updated stale empty-state guidance. This report supersedes initial validation/dependency status in `repository-preparation.md`. Other legacy architecture cleanup remains incremental. |
 | Original #6 filename | Sanitized Windows-illegal filename characters; regression coverage added. |
 
 Do not close or rewrite original issues #2/#12 from this branch. Their applicability belongs to the office architecture review.

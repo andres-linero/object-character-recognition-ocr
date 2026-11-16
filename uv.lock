@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -384,7 +384,6 @@ dev = [
     { name = "pre-commit", specifier = ">=4,<5" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = "==0.17.4" },
-    { name = "streamlit", specifier = ">=1.37" },
 ]
 
 [[package]]

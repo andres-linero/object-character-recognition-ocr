@@ -81,7 +81,6 @@ The frontend uses HTML, CSS and JavaScript. FastAPI serves the UI and API, and s
 From the repository root:
 
 ```sh
-uv sync --locked --all-groups
 # Preserve an existing local configuration:
 test -f .env || cp .env.example .env
 ```
@@ -93,13 +92,19 @@ AZURE_DOC_INTEL_ENDPOINT=https://YOUR-RESOURCE.cognitiveservices.azure.com/
 AZURE_DOC_INTEL_KEY=YOUR-KEY
 ```
 
-Initialize storage, generate samples and start the server:
+Start the app with one command. uv installs the locked Python dependencies and the app initializes storage if needed:
 
 ```sh
-uv run --locked python scripts/prepare_workspace.py
-uv run --locked python scripts/create_rental_hierarchy_sample.py --all-batches
-sh scripts/run_web.sh
+uv run --locked python -m ocr_workspace
 ```
+
+For a fresh checkout, generate demo PDFs once in another terminal:
+
+```sh
+uv run --locked python scripts/create_rental_hierarchy_sample.py --all-batches
+```
+
+Python dependencies are declared in `pyproject.toml` and resolved in `uv.lock`. There are no separate requirements files to install. `uv sync --locked --all-groups` is available when you want to prepare the environment without starting the app. Frontend test dependencies remain in `web/package.json` and `web/package-lock.json`.
 
 Open **http://127.0.0.1:8700/#/overview** and choose a PDF from `Scans/incomming_scan/`. That folder retains its existing spelling for compatibility. Upload through the browser; copying a PDF into the folder does not submit it.
 

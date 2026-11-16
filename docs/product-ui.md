@@ -1,6 +1,6 @@
 # Product UI and automatic scan intake
 
-Run `sh scripts/run_web.sh` from the repository. It uses `.venv` when available, initializes an empty `demo_runtime/workspace.sqlite` if absent, and serves http://127.0.0.1:8700.
+Run `uv run --locked python -m ocr_workspace` from the repository. uv installs the locked Python dependencies; the app initializes an empty `demo_runtime/workspace.sqlite` if absent and serves http://127.0.0.1:8700. `sh scripts/run_web.sh` remains a wrapper for the same command.
 
 The left tabs are **Overview**, **Dataset**, **OCR activity**, **Flags**, and **Ingestion history**. Dataset displays only orders extracted from submitted PDFs. There is one live workspace, without Azure-verified/full-demo/new-test choices. Sample refresh replaces named templates while preserving submitted originals and scan history.
 
