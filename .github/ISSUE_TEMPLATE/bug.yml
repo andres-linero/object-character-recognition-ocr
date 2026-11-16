@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible problem in Order Scanner.
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: Use synthetic inputs. Do not include credentials, private documents, or unreviewed logs.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the view, action, synthetic sample and revision.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and sanitized evidence
+      description: OS, Python, browser, error code and redacted logs or screenshots.
+    validations:
+      required: true
