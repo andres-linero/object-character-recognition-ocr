@@ -22,7 +22,7 @@ The former Streamlit interfaces and demo launcher have been removed. There is no
 | PDF is refused | Current synthetic manifest allowlist and 50 MB upload limit |
 | Processing has no match | Identifier position within the crop and processing evidence |
 | Order is incomplete | Flags, missing printed pages and conflicting extracted fields |
-| Failed provider attempt | Inspect the saved failure; failed attempts are not silently retried |
+| Failed provider attempt | The provider client retries rate limits, server errors and network failures with bounded backoff. A page that still fails is saved as an error and flagged; submit the PDF again (or use `--retry-errors` in the CLI) to read only the failed pages |
 
 ## Recovery and retention
 
@@ -30,7 +30,7 @@ Stop the app before changing local state. Back up `demo_runtime/workspace.sqlite
 
 Startup applies migrations and recovers pending durable upload markers. Do not use `scripts/rebuild_scan_dataset.py` for ordinary recovery: it is a destructive reset tool that requires `--confirm-reset` and deletes scans, uploads, databases and workflow history. Sample regeneration preserves uploaded originals and workflow history.
 
-Older workbook/index utilities may retain file-backed caches. These are separate from the current app; do not open untrusted pickle files or erase old state without checking its purpose.
+OCR results are cached in the database by the SHA-256 of the header crop sent to the provider, so a re-synced, renamed or appended PDF does not pay again for pages already read. A page whose attempt failed is never cached and is read again the next time its PDF is submitted. The former workbook/index utilities and their pickle/JSON caches have been removed; a leftover `ocr_workspace/cache/` directory is unused and can be deleted.
 
 ## Validation
 

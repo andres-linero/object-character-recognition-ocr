@@ -2,7 +2,7 @@
 import io
 import zipfile
 
-import fitz
+import pymupdf as fitz
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -206,7 +206,7 @@ def test_migration_adds_approvals_without_changing_existing_scan_data(repair_wor
     store.migrate()
     assert store.counts() == before
     assert store.rows(select(db.page_approvals)) == []
-    assert [r['version'] for r in store.rows(select(db.versions).order_by(db.versions.c.version))] == [1, 2, 3, 4, 5]
+    assert [r['version'] for r in store.rows(select(db.versions).order_by(db.versions.c.version))] == [1, 2, 3, 4, 5, 6]
 
 
 def test_legacy_agreement_number_maps_to_one_ro_without_changing_page_history(repair_workspace):

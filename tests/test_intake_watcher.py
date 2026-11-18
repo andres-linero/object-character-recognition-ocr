@@ -1,6 +1,6 @@
 """Folder intake detects stable PDFs and persists actual matching without repeat calls."""
 import shutil
-import fitz
+import pymupdf as fitz
 import pytest
 from pathlib import Path
 
@@ -147,3 +147,35 @@ def test_worker_waits_for_old_live_connection_to_release_lock(tmp_path, monkeypa
         assert intake_watcher._acquire_worker_lock(lock, stop, progress)
     assert len(attempts) == 2
     assert progress.snapshot()['phase'] == 'waiting'
+
+
+def test_transient_page_error_is_retried_on_resubmission_and_page_limit_stops_a_file(tmp_path, monkeypatch):
+    outside = tmp_path / 'ready_to_scan'
+    manifest = generate_dataset(outside, count=1, min_pages=6, max_pages=6, rasterize=False)
+    pdf = outside / manifest['tickets'][0]['pdf']
+    folder = tmp_path / 'incoming'
+    store = db.Store(db.sqlite_url(tmp_path / 'workspace.sqlite'))
+    try:
+        store.migrate()
+        ingest_tracker(store, outside / 'orders.xlsx', 'demo', synthetic=True)
+        calls = []
+        def extract(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 3:
+                raise ConnectionError('transient')
+            return manifest['tickets'][0]['shipment']
+        worker = IntakeWatcher(store, folder, {checksum(pdf)}, extract)
+        shutil.copy2(pdf, folder / 'scan.pdf')
+        monkeypatch.setenv('OCR_MAX_PAGES_PER_FILE', '4')
+        worker.tick(submitted=folder / 'scan.pdf')
+        assert len(calls) == 4 and worker.progress.snapshot()['phase'] == 'error'
+        monkeypatch.delenv('OCR_MAX_PAGES_PER_FILE')
+        worker = IntakeWatcher(store, folder, {checksum(pdf)}, extract)  # restart or re-upload
+        worker.tick(submitted=folder / 'scan.pdf')
+        # Only the errored page and the two never-attempted pages are read again.
+        assert len(calls) == 7
+        assert worker.progress.snapshot()['phase'] == 'ready'
+        latest = {r['page_id']: r['status'] for r in store.rows(select(db.attempts).order_by(db.attempts.c.started_at))}
+        assert list(latest.values()) == ['success'] * 6
+    finally:
+        store.close()

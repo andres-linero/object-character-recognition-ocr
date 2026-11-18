@@ -1,7 +1,7 @@
 """RO groups distinct OD orders and SO shipments; cropped OD values require review."""
 import io
 from pathlib import Path
-import fitz
+import pymupdf as fitz
 import zipfile
 
 import pytest
@@ -263,7 +263,7 @@ def test_saved_scan_zip_summary_survives_restart_without_provider_calls(hierarch
 
 def test_sample_refresh_creates_64_grouped_work_orders_and_preserves_workspace(tmp_path):
     import json
-    import fitz
+    import pymupdf as fitz
     from scripts.create_rental_hierarchy_sample import create_batches
 
     database = tmp_path / 'demo_runtime/workspace.sqlite'

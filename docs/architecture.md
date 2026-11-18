@@ -18,7 +18,7 @@ The current product is a localhost document and order workspace. A static HTML/C
 | `ocr_workspace/etl.py` | SQL upserts and separate tracker-import utilities |
 | `scripts/` | Startup, sample generation, maintenance and validation |
 
-`ocr_workspace` is the application package. `data_loader.py`, `scan_index.py` and `utils.py` retain separately tested workbook/index compatibility utilities; they do not provide the current browser UI.
+`ocr_workspace` is the application package. The former workbook loader, JSON scan index and their file caches have been removed; every module in the package serves the current web app or its ingestion CLI.
 
 ## Processing and persistence
 

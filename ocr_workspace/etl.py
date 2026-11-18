@@ -6,17 +6,14 @@ import json
 from pathlib import Path
 import re
 
-import fitz
+import pymupdf as fitz
 import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
-try:
-    from . import storage as db
-except ImportError:
-    import storage as db
+from . import storage as db
 
 
 def checksum(path):

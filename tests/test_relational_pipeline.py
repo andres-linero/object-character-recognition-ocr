@@ -3,7 +3,7 @@ import csv
 import json
 import os
 
-import fitz
+import pymupdf as fitz
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -60,7 +60,7 @@ def test_repeat_loads_upsert_and_keep_provenance(store, tmp_path):
     assert store.order_rows()[0]["Status"] == "COMPLETE"
     assert store.counts()["orders"] == 1
     store.migrate()  # migration version remains stable on repeated startup
-    assert len(store.rows(select(db.versions))) == 5
+    assert len(store.rows(select(db.versions))) == 6
 
 
 def test_invalid_rows_are_quarantined_and_multiple_work_orders_can_share_a_shipment(store, tmp_path):
@@ -128,6 +128,53 @@ def test_ocr_errors_are_retryable_without_redoing_successful_pages(store, tmp_pa
     assert process_batch(store, retry_errors=True, extractor=broken) == []
     assert store.counts()["ocr_attempts"] == 2
     assert store.rows(select(db.associations))[0]["method"] == "azure_ocr"
+
+
+def test_identical_header_crops_reuse_the_cached_provider_result(store, tmp_path, monkeypatch):
+    from ocr_workspace import ocr
+    etl.ingest_tracker(store, tracker(tmp_path / "orders.csv"))
+    def scan(name, pages):
+        with fitz.open() as doc:
+            for _ in range(pages):
+                doc.new_page().insert_text((340, 60), "Shipment No. 800001")
+            doc.save(tmp_path / name)
+        return register_pdf(store, tmp_path / name)
+    calls = []
+    def provider(image, crop_header=True):
+        calls.append(image)
+        if len(calls) == 1:
+            raise RuntimeError("provider unavailable")
+        return ocr.ParsedIdentifier("shipment", "800001", {"shipment": "800001"})
+    monkeypatch.setattr(ocr, "extract_order_identity", provider)
+    scan("first.pdf", 1)
+    # A failed read is never cached; the retry is the first billable success.
+    assert process_batch(store)[0]["status"] == "error"
+    assert process_batch(store, retry_errors=True)[0]["cached"] is False
+    # The same pages re-scanned with one appended: no new provider calls.
+    scan("appended.pdf", 2)
+    results = process_batch(store)
+    assert [r["status"] for r in results] == ["success", "success"]
+    assert all(r["cached"] for r in results) and len(calls) == 2
+    providers = [r["provider"] for r in store.rows(select(db.attempts).order_by(db.attempts.c.started_at))]
+    assert providers.count("ocr_result_cache") == 2
+    # A parser change invalidates stored results instead of hiding the fix.
+    monkeypatch.setattr(ocr, "PARSER_VERSION", ocr.PARSER_VERSION + 1)
+    scan("after_parser_change.pdf", 3)
+    assert [r["cached"] for r in process_batch(store)] == [False, True, True]
+
+
+def test_tracker_matching_uses_the_shipment_when_the_header_also_prints_a_rental_number(store, tmp_path):
+    from ocr_workspace import ocr
+    etl.ingest_tracker(store, tracker(tmp_path / "orders.csv"))
+    pdf = tmp_path / "ticket.pdf"
+    with fitz.open() as doc:
+        doc.new_page().insert_text((340, 60), "Shipment No. 800001")
+        doc.save(pdf)
+    register_pdf(store, pdf)
+    header = "Delivery Ticket / Shipment Shipment No. 800001 Rental Agreement No. RA-700101"
+    assert ocr.parse_identifier(header).kind == "rental_order"
+    result = process_batch(store, extractor=lambda *a, **k: ocr.parse_identifier(header))[0]
+    assert (result["status"], result["identifier"]) == ("success", "800001")
 
 
 def test_postgres_ddl_has_explicit_schema_and_constraints():

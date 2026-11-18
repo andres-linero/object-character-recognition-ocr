@@ -1,5 +1,5 @@
 """Page evidence survives failed identification and never fabricates a signature."""
-import fitz
+import pymupdf as fitz
 import json
 import pytest
 from types import SimpleNamespace
