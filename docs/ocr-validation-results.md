@@ -1,8 +1,10 @@
 # Live Azure OCR validation: two synthetic batches
 
+> **Read this first: the order numbering changed after this run.** Today a rental order (`RO-0000002`) creates work orders (`W-0000001`) and a sales order (`SO-0000001`) creates shipments (`Shipment 00001`); rental and sales orders share one count. See [order numbering](demo-workflow.md#order-numbering). The identifier parser is at version 3 (`PARSER_VERSION` in `ocr_workspace/ocr.py`). The run below was made on an older identifier scheme with different number formats; its headers also printed a rental agreement number, which no longer exists. **The live validation has not been repeated on the current numbering**, so these results do not validate the current parser or the current sample files. The figures and wording below are kept as the historical record.
+
 Date: 2026-11-16 (report written 2026-11-17 01:50 UTC). Replaces the first run of 2026-11-06, which gave the same totals on the earlier parser.
 
-> This run used the current code: the typed identifier parser, the reused provider client with bounded retries, and migration 6. The result cache was bypassed, so all 120 pages were live provider calls. The two batches were regenerated with `scripts/create_demo_data.py` (seeds 2 and 3, ticket indexes 101–120, six pages each); they are equivalent fixtures, not the files from the first run.
+> This run used the code as it was on 2026-11-16: the typed identifier parser, the reused provider client with bounded retries, and migration 6. The result cache was bypassed, so all 120 pages were live provider calls. The two batches were regenerated with `scripts/create_demo_data.py` (seeds 2 and 3, ticket indexes 101–120, six pages each); they are equivalent fixtures, not the files from the first run.
 
 ## Result
 

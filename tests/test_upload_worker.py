@@ -2,6 +2,7 @@
 import time
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from ocr_workspace import ocr, storage as db
 from ocr_workspace.web_api import create_app
@@ -20,7 +21,7 @@ def test_upload_starts_ocr_and_recovers_queued_upload_on_restart(tmp_path, monke
 
     def extract(*args, **kwargs):
         calls.append(1)
-        return ocr.ParsedIdentifier('shipment', manifest['tickets'][0]['shipment'])
+        return ocr.ParsedIdentifier('work_order', manifest['tickets'][0]['order_id'])
 
     monkeypatch.setattr(ocr, 'extract_order_identity', extract)
     monkeypatch.setenv('AZURE_DOC_INTEL_ENDPOINT', 'https://example.invalid')
@@ -36,6 +37,8 @@ def test_upload_starts_ocr_and_recovers_queued_upload_on_restart(tmp_path, monke
             time.sleep(.01)
         assert app.state.intake_progress.snapshot()['phase'] == 'ready'
         assert len(calls) == 6
+        assert [(o['order_number'], o['order_type']) for o in store.rows(select(db.orders))] == [('W-0000001', 'RENTAL')]
+        assert [r['rental_number'] for r in store.rows(select(db.rental_orders))] == ['RO-0000001']
         assert not list((tmp_path / 'Scans/incomming_scan').glob('*.queued'))
     # Simulate an accepted submission surviving a server stop before delivery.
     path = tmp_path / 'Scans/incomming_scan/recovered.pdf'

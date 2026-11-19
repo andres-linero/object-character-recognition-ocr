@@ -11,9 +11,9 @@ def ticket_filename(ticket):
         return value or fallback
 
     customer = re.sub(r'^Demo\s+', '', ticket.get('customer') or '', flags=re.I)
-    return '__'.join([
-        clean(customer, 'Customer-not-recorded', 48),
-        clean(ticket.get('work_order'), 'Order-not-recorded', 24),
-        clean(ticket.get('parent_rental_number') or ticket.get('rental_order'), 'Rental-not-recorded', 24),
-        clean(ticket.get('billing_address'), 'Address-not-recorded', 90),
-    ]) + '.pdf'
+    # Order (RO or SO) first, then the work order or shipment created from it.
+    parts = [clean(customer, 'Customer-not-recorded', 48),
+             clean(ticket.get('parent_order_number'), 'Order-not-recorded', 24)]
+    parts.append(clean(ticket.get('order_number'), 'Work-order-not-recorded', 24))
+    parts.append(clean(ticket.get('billing_address'), 'Address-not-recorded', 90))
+    return '__'.join(parts) + '.pdf'

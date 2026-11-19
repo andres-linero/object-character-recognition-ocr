@@ -9,8 +9,6 @@ Run from the repository root. Copy `.env.example` to `.env` if no local file exi
 | `AZURE_DOC_INTEL_ENDPOINT` | Azure Document Intelligence endpoint, required for OCR |
 | `AZURE_DOC_INTEL_KEY` | Azure Document Intelligence key, required for OCR |
 | `OCR_HEADER_NOISE` | Optional form-specific text exclusions, separated by `|` |
-| `OCR_EXCLUDED_NUMBERS` | Optional comma-separated numeric exclusions |
-| `OCR_ALLOW_UNLABELED_FALLBACK` | Legacy ambiguous-number fallback; off by default |
 | `OCR_MAX_PAGES_PER_FILE` | Optional cost guard: stop a scan after this many billable OCR pages; `0` or unset means no limit |
 | `OCR_CAPTURE_PATH` | Optional, development only: local JSONL file that receives OCR header text and its parsed result for promotion into the golden corpus. Leave unset in normal use |
 
@@ -36,6 +34,7 @@ Workbook imports and older demo preparation are separate from browser uploads. T
 | `Scans/flag_order/` | Scans and reports needing attention |
 | `Scans/output/` | Compiled PDFs |
 | `Scans/manifest.json` | Synthetic sample allowlist and expected cases |
+| `demo_data/order_samples/` | Optional 300-order sample scans, `orders.csv` and `manifest.json` from `scripts/create_order_samples.py`; see [demo data](demo-data.md#300-order-sample-scans) |
 | `demo_runtime/workspace.sqlite` | Orders, pages, attempts, cached OCR results, approvals and download receipts |
 | `demo_runtime/read-scan` | Compiled local extraction helper |
 

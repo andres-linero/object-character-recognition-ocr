@@ -10,7 +10,7 @@ The current product is a localhost document and order workspace. A static HTML/C
 | `ocr_workspace/web_api.py` | HTTP API, static client, upload queue and worker lifecycle |
 | `ocr_workspace/intake_watcher.py` | Upload processing, worker locking, progress and compiled PDFs |
 | `ocr_workspace/ocr.py` | Azure identifier extraction and parsing |
-| `ocr_workspace/document_data.py` | Local page fields and rental-order context |
+| `ocr_workspace/document_data.py` | Local page fields and the page's parent order (rental or sales) |
 | `ocr_workspace/processing.py` | Document registration and persisted page OCR attempts |
 | `ocr_workspace/page_review.py` | Field comparison and manual assignment rules |
 | `ocr_workspace/ticket_names.py` | Download filename generation |

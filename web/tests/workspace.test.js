@@ -7,9 +7,11 @@ const script = await readFile(new URL("../app.js", import.meta.url), "utf8");
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const tickets = Array.from({ length: 20 }, (_, i) => ({
   id: `ticket-${i}`,
-  work_order: `W-${990120 - i}`,
-  shipment: String(900120 - i),
-  rental_order: `RA-${700120 - i}`,
+  // One rental order with 19 work orders, one sales order with one shipment.
+  order_number:
+    i === 19 ? "Shipment 00001" : `W-${String(i + 1).padStart(7, "0")}`,
+  parent_order_number: i === 19 ? "SO-0000002" : "RO-0000001",
+  parent_id: i === 19 ? "so-2" : "ro-1",
   customer:
     i === 0 ? "Demo <script>alert(1)</script> Builder" : `Demo Customer ${i}`,
   delivery_location: `Demo Depot ${i + 1}`,
@@ -18,7 +20,7 @@ const tickets = Array.from({ length: 20 }, (_, i) => ({
   order_date: "2030-04-01",
   due_date: "2030-04-10",
   assigned_to: "Dispatch Desk",
-  order_type: "RENTAL",
+  order_type: i === 19 ? "SALE" : "RENTAL",
   expected_pages: 6,
   verified_pages: 6,
   ocr_status: "verified",
@@ -54,9 +56,12 @@ async function boot(hash = "") {
       const q = url.searchParams.get("q");
       if (q)
         rows = rows.filter((t) =>
-          [t.work_order, t.customer, t.shipment, t.billing_address].some((v) =>
-            v.includes(q),
-          ),
+          [
+            t.order_number,
+            t.customer,
+            t.parent_order_number,
+            t.billing_address,
+          ].some((v) => String(v ?? "").includes(q)),
         );
       if (url.searchParams.get("status"))
         rows = rows.filter((t) => t.status === url.searchParams.get("status"));
@@ -78,8 +83,8 @@ async function boot(hash = "") {
                 ? "Rental Agreement"
                 : "Delivery Acknowledgement",
           copy: i % 2 ? "Yellow" : "White",
-          expected: ticket.shipment,
-          extracted: ticket.shipment,
+          expected: ticket.order_number,
+          extracted: ticket.order_number,
           ocr_status: "success",
           matched: true,
           processed_at: "2026-11-06T19:00:00Z",
@@ -106,7 +111,7 @@ async function boot(hash = "") {
             id: "attempt-1",
             page_id: "page-1",
             matched_order: tickets[0],
-            identifier: "900120",
+            identifier: "W-0000001",
             status: "success",
             page: 55,
             document: "demo_batch.pdf",
@@ -182,7 +187,7 @@ test("restored tabs count files and show dataset context without test-stage choi
   assert.ok(document.querySelector("tbody"));
   assert.equal(document.querySelector(".customer-cell script"), null);
   assert.match(document.querySelector("tbody tr").textContent, /<script>alert/);
-  assert.match(document.querySelector("tbody tr").textContent, /RO-700120/);
+  assert.match(document.querySelector("tbody tr").textContent, /RO-0000001/);
   assert.match(
     document.querySelector("tbody tr").textContent,
     /200 Simulation Way/,
@@ -215,11 +220,11 @@ test("ticket drawer exposes the selected order, page evidence, and a six-page do
   const { dom, document } = await boot();
   findButton(document, "Dataset").click();
   await wait(25);
-  document.querySelector('[aria-label="View W-990120"]').click();
+  document.querySelector('[aria-label="View W-0000001"]').click();
   await wait(25);
   assert.equal(
     document.querySelector("[role=dialog] h2").textContent,
-    "W-990120",
+    "W-0000001",
   );
   assert.match(
     document.querySelector(".address-block").textContent,
@@ -234,7 +239,7 @@ test("ticket drawer exposes the selected order, page evidence, and a six-page do
   assert.equal(document.querySelectorAll(".evidence-row").length, 6);
   document.querySelectorAll(".evidence-row")[5].click();
   assert.match(document.querySelector(".paper-image").alt, /page 6/);
-  document.querySelector('[aria-label="Close work order"]').click();
+  document.querySelector('[aria-label="Close order"]').click();
   assert.equal(document.querySelector("[role=dialog]"), null);
   dom.window.close();
 });
@@ -319,7 +324,7 @@ test("live worker events advance connected stages and expose downloads only on P
       completed: 6,
       matched: 6,
       revision: 3,
-      ready_tickets: [{ id: "ticket-0", work_order: "W-990120" }],
+      ready_tickets: [{ id: "ticket-0", order_number: "W-0000001" }],
     }),
   });
   assert.equal(document.querySelector(".scan-download-panel a"), null);
@@ -515,7 +520,7 @@ test("complete orders can be downloaded while other orders in the scan need revi
       completed: 11,
       matched: 11,
       revision: 30,
-      ready_tickets: [{ id: "ticket-0", work_order: "W-990120" }],
+      ready_tickets: [{ id: "ticket-0", order_number: "W-0000001" }],
     }),
   });
   assert.match(
@@ -958,17 +963,15 @@ test("old review route opens the dedicated Flags tab", async () => {
   dom.window.close();
 });
 
-test("RO groups child TKs and retains RO-only pages without mixing parent orders", async () => {
+test("RO groups child work orders and retains RO-only pages without mixing parent orders", async () => {
   const { dom, document } = await boot();
   const fetch = dom.window.fetch;
   const rows = tickets.slice(0, 2).map((ticket, i) => ({
     ...ticket,
     customer: "Amber Projects",
-    work_order: `TK-${992001 + i}`,
-    ticket_number: `TK-${992001 + i}`,
-    shipment: "904001",
-    rental_id: "ro-1",
-    parent_rental_number: "RO-810001",
+    order_number: `W-000010${1 + i}`,
+    parent_id: "ro-1",
+    parent_order_number: "RO-0000001",
     download_ready: i === 0,
     ocr_status: i === 0 ? "verified" : "partial",
     verified_pages: i === 0 ? 6 : 5,
@@ -978,14 +981,16 @@ test("RO groups child TKs and retains RO-only pages without mixing parent orders
   const parents = [
     {
       id: "ro-1",
-      rental_number: "RO-810001",
+      parent_number: "RO-0000001",
+      order_type: "RENTAL",
       customer: "Amber Projects",
       tickets: rows,
       unassigned_pages: 1,
     },
     {
       id: "ro-2",
-      rental_number: "RO-810002",
+      parent_number: "RO-0000003",
+      order_type: "RENTAL",
       customer: "Amber Projects",
       tickets: [],
       unassigned_pages: 1,
@@ -995,8 +1000,8 @@ test("RO groups child TKs and retains RO-only pages without mixing parent orders
     const url = new URL(path, "http://localhost:8700");
     let data;
     if (url.pathname.endsWith("/tickets")) data = { tickets: rows, total: 2 };
-    else if (url.pathname.endsWith("/rental-orders"))
-      data = { rental_orders: parents };
+    else if (url.pathname.endsWith("/parent-orders"))
+      data = { parent_orders: parents, total: parents.length };
     else if (url.pathname.endsWith("/activity"))
       data = {
         files: 1,
@@ -1008,9 +1013,9 @@ test("RO groups child TKs and retains RO-only pages without mixing parent orders
           document_id: "same-scan",
           document: "mixed.pdf",
           status: "no_match",
-          rental_id: p.id,
-          parent_rental_number: p.rental_number,
-          identifier: p.rental_number,
+          parent_id: p.id,
+          parent_order_number: p.parent_number,
+          identifier: p.parent_number,
         })),
       };
     else return fetch(path, options);
@@ -1018,19 +1023,21 @@ test("RO groups child TKs and retains RO-only pages without mixing parent orders
   };
   findButton(document, "Dataset").click();
   await wait(30);
-  assert.match(
-    document.querySelector("thead").textContent,
-    /Rental order \(RO\)/,
+  assert.deepEqual(
+    [...document.querySelectorAll("thead th")]
+      .slice(0, 3)
+      .map((th) => th.textContent),
+    ["Order", "Work order", "Address"],
   );
   assert.equal(document.querySelectorAll("tbody tr").length, 2);
-  assert.match(document.querySelector("tbody").textContent, /TK-992001/);
-  assert.match(document.querySelector("tbody").textContent, /TK-992002/);
+  assert.match(document.querySelector("tbody").textContent, /W-0000101/);
+  assert.match(document.querySelector("tbody").textContent, /W-0000102/);
   findButton(document, "Overview").click();
   await wait(30);
   const ready = document.querySelector(
     '#overview-results-ready [data-order-id="ticket-0"]',
   );
-  assert.match(ready.textContent, /TK-992001/);
+  assert.match(ready.textContent, /W-0000101/);
   assert.match(ready.textContent, /Approved/);
   assert.equal(document.querySelector("#overview-order-results details"), null);
   assert.equal(
@@ -1046,7 +1053,7 @@ test("RO groups child TKs and retains RO-only pages without mixing parent orders
   findButton(document, "Flags").click();
   await wait(30);
   const groups = document.querySelectorAll(
-    "#flags-results .rental-order-group",
+    "#flags-results .parent-order-group",
   );
   assert.equal(groups.length, 2);
   for (const group of groups) {
@@ -1055,13 +1062,13 @@ test("RO groups child TKs and retains RO-only pages without mixing parent orders
     assert.equal(group.querySelector("[data-flag-scan]").open, false);
   }
   const second = document.querySelector(
-    '#flags-results [data-rental-id="ro-2"]',
+    '#flags-results [data-parent-id="ro-2"]',
   );
-  assert.match(second.textContent, /RO-810002/);
+  assert.match(second.textContent, /Rental order RO-0000003/);
   assert.match(second.textContent, /0 work orders/);
   assert.equal(second.querySelector("[data-order-id]"), null);
-  assert.match(second.textContent, /RO identified, ticket needs review/);
-  assert.doesNotMatch(second.textContent, /TK-99200/);
+  assert.match(second.textContent, /RO identified, work order needs review/);
+  assert.doesNotMatch(second.textContent, /W-00001/);
   assert.equal(
     document.querySelector("#flags-results img, #flags-results iframe"),
     null,
@@ -1098,7 +1105,7 @@ for (const gap of ["unidentified_in_scan", "not_in_scan"]) {
     };
     findButton(document, "Dataset").click();
     await wait(30);
-    document.querySelector('[aria-label="View W-990120"]').click();
+    document.querySelector('[aria-label="View W-0000001"]').click();
     await wait(30);
     findButton(document, "OCR results").click();
     assert.equal(findButton(document, "Fix pages"), undefined);
@@ -1165,7 +1172,7 @@ for (const reject of [false, true]) {
         Object.assign(data, {
           customer: "Demo Amber Logistics",
           billing_address: "1106 Simulation Way",
-          rental_order: "RA-701007",
+          parent_order_number: "RO-0000007",
           download_ready: approved,
           ocr_status: approved ? "verified" : "partial",
           verified_pages: approved ? 6 : 5,
@@ -1183,12 +1190,10 @@ for (const reject of [false, true]) {
                   source_page: 38,
                   identifier: "88888888",
                   fields: {
-                    customer: "Amber Logistics",
-                    address: "1106 Simulation Way",
-                    work_order: null,
-                    shipment: "88888888",
-                    parent_rental_number: null,
-                    rental_order: "RA-701007",
+                    customer: null,
+                    address: null,
+                    order_number: null,
+                    parent_order_number: null,
                     document_type: "Delivery Acknowledgement",
                     page_number: 1,
                     expected_pages: 6,
@@ -1215,7 +1220,7 @@ for (const reject of [false, true]) {
     };
     findButton(document, "Dataset").click();
     await wait(30);
-    document.querySelector('[aria-label="View W-990120"]').click();
+    document.querySelector('[aria-label="View W-0000001"]').click();
     await wait(30);
     assert.equal(findButton(document, "Fix pages"), undefined);
     findButton(document, "OCR results").click();
@@ -1225,7 +1230,10 @@ for (const reject of [false, true]) {
     assert.equal(document.querySelectorAll(".fix-thumbnail").length, 2);
     assert.equal(document.querySelector("#approve-page").disabled, true);
     assert.equal(document.querySelector(".paper-image"), null);
-    assert.match(document.querySelector(".fix-target").textContent, /W-990120/);
+    assert.match(
+      document.querySelector(".fix-target").textContent,
+      /W-0000001/,
+    );
     const drawer = document.querySelector(".detail-drawer");
     const left = document.querySelector(".detail-left");
     const gallery = document.querySelector(".fix-gallery");
@@ -1255,24 +1263,20 @@ for (const reject of [false, true]) {
     document.querySelector("#fix-acknowledgment input").click();
     assert.equal(document.querySelector("#approve-page").disabled, false);
     const fields = document.querySelector(".page-fixer .page-fields-panel");
-    assert.match(fields.textContent, /Amber Logistics/);
-    assert.match(fields.textContent, /1106 Simulation Way/);
-    assert.match(fields.textContent, /88888888/);
-    assert.match(fields.textContent, /RO-701007/);
+    assert.match(fields.textContent, /Delivery Acknowledgement/);
+    assert.doesNotMatch(fields.textContent, /RO-0000007|Shipment/);
     assert.match(fields.textContent, /Not signed — stated on page/);
     assert.match(fields.textContent, /NOT SIGNED - DEMO/);
     assert.equal(
       [...fields.querySelectorAll(".detail-field")]
-        .find(
-          (n) => n.querySelector("dt").textContent === "Ticket / work order",
-        )
+        .find((n) => n.querySelector("dt").textContent === "Work order")
         .querySelector("dd").textContent,
       "Not read",
     );
-    assert.doesNotMatch(fields.textContent, /W-990120/);
+    assert.doesNotMatch(fields.textContent, /W-0000001/);
     assert.match(
       document.querySelector("#approve-page").textContent,
-      /Link source 38 → W-990120 · page 1/,
+      /Link source 38 → W-0000001 · page 1/,
     );
     document.querySelector("#approve-page").click();
     await wait(80);
@@ -1331,11 +1335,8 @@ test("selected page details exist only in Flags and change with page selection",
         page.fields = {
           customer: "Amber Projects",
           address: `${1100 + i} Simulation Way`,
-          customer_order_number: "CO-123456",
-          work_order: "TK-992001",
-          shipment: "904001",
-          parent_rental_number: "RO-810001",
-          rental_order: "RO-810001",
+          order_number: "W-0000101",
+          parent_order_number: "RO-0000001",
           document_type: page.paper,
           page_number: i + 1,
           expected_pages: 6,
@@ -1347,7 +1348,7 @@ test("selected page details exist only in Flags and change with page selection",
   };
   findButton(document, "Dataset").click();
   await wait(30);
-  document.querySelector('[aria-label="View W-990120"]').click();
+  document.querySelector('[aria-label="View W-0000001"]').click();
   await wait(30);
   findButton(document, "OCR results").click();
   assert.equal(document.querySelector(".page-fields-panel"), null);
@@ -1356,18 +1357,24 @@ test("selected page details exist only in Flags and change with page selection",
   let panel = document.querySelector(
     "#selected-page-review .page-fields-panel",
   );
-  assert.match(panel.textContent, /CO-123456/);
-  assert.match(panel.textContent, /TK-992001/);
-  assert.match(panel.textContent, /904001/);
-  assert.match(panel.textContent, /RO-810001/);
+  assert.match(panel.textContent, /Work orderW-0000101/);
+  assert.match(panel.textContent, /OrderRO-0000001/);
+  assert.doesNotMatch(panel.textContent, /Shipment|Customer order/);
   assert.doesNotMatch(panel.textContent, /Rental agreement \(RA\)/);
   assert.equal(
-    document.querySelector('.page-comparison [data-check="rental_order"]'),
+    document.querySelector(
+      '.page-comparison [data-check="rental_order"], .page-comparison [data-check="shipment"], .page-comparison [data-check="work_order"]',
+    ),
     null,
   );
   assert.equal(
+    document.querySelectorAll('.page-comparison [data-check="order_number"]')
+      .length,
+    1,
+  );
+  assert.equal(
     document.querySelectorAll(
-      '.page-comparison [data-check="parent_rental_number"]',
+      '.page-comparison [data-check="parent_order_number"]',
     ).length,
     1,
   );
@@ -1387,7 +1394,7 @@ test("selected page details exist only in Flags and change with page selection",
   assert.equal(left.scrollTop, 180);
   assert.doesNotMatch(
     document.querySelector(".evidence-row").textContent,
-    /Expected|904001|900120/,
+    /Expected|W-0000001/,
   );
   panel = document.querySelector("#selected-page-review .page-fields-panel");
   assert.match(panel.textContent, /1101 Simulation Way/);
@@ -1399,7 +1406,7 @@ test("selected page details exist only in Flags and change with page selection",
   dom.window.close();
 });
 
-test("OD pages show OD, RO and SO without a duplicate customer-order identifier", async () => {
+test("shipment pages show the shipment under its sales order", async () => {
   const { dom, document, window } = await boot();
   const fetch = window.fetch;
   window.fetch = async (path, options) => {
@@ -1407,15 +1414,17 @@ test("OD pages show OD, RO and SO without a duplicate customer-order identifier"
     const data = await response.json();
     if (path.endsWith("/tickets/ticket-0")) {
       Object.assign(data, {
-        work_order: "OD-992003",
+        order_number: "Shipment 00001",
+        order_type: "SALE",
+        parent_order_number: "SO-0000002",
+        parent_id: "so-2",
         download_ready: false,
         ocr_status: "partial",
       });
       data.pages.forEach((page, index) => {
         page.fields = {
-          work_order: "OD-992003",
-          shipment: "904002",
-          parent_rental_number: "RO-810001",
+          order_number: "Shipment 00001",
+          parent_order_number: "SO-0000002",
           customer: "Amber Workshop",
           address: "2100 Simulation Way",
           page_number: index + 1,
@@ -1427,7 +1436,7 @@ test("OD pages show OD, RO and SO without a duplicate customer-order identifier"
   };
   findButton(document, "Dataset").click();
   await wait(30);
-  document.querySelector('[aria-label="View W-990120"]').click();
+  document.querySelector('[aria-label="View W-0000001"]').click();
   await wait(30);
   findButton(document, "OCR results").click();
   findButton(document, "Review in Flags").click();
@@ -1438,17 +1447,46 @@ test("OD pages show OD, RO and SO without a duplicate customer-order identifier"
   const labels = [...panel.querySelectorAll("dt")].map(
     (node) => node.textContent,
   );
-  assert.ok(labels.includes("Order number (OD)"));
-  assert.ok(labels.includes("Rental order (RO)"));
-  assert.ok(labels.includes("Shipment / SO"));
-  assert.equal(labels.includes("Customer order #"), false);
-  assert.equal(
-    document.querySelectorAll(
-      '.page-comparison [data-check="customer_order_number"]',
-    ).length,
-    0,
+  assert.ok(labels.includes("Order"));
+  assert.ok(labels.includes("Shipment"));
+  assert.equal(labels.includes("Work order"), false);
+  assert.equal(labels.includes("Order conflict"), false);
+  assert.deepEqual(
+    [...document.querySelectorAll(".page-comparison tbody tr")].map((row) => [
+      row.dataset.check,
+      row.querySelector("th").textContent,
+    ]),
+    [
+      ["customer", "Customer"],
+      ["address", "Address"],
+      ["parent_order_number", "Order"],
+      ["order_number", "Work order"],
+      ["page_number", "Printed page"],
+      ["expected_pages", "Page total"],
+    ],
   );
-  assert.equal(document.querySelector(".detail-kicker").textContent, "ORDER");
+  assert.match(
+    document.querySelector('.page-comparison [data-check="order_number"]')
+      .textContent,
+    /Shipment 00001/,
+  );
+  const parentCheck = document.querySelector(
+    '.page-comparison [data-check="parent_order_number"]',
+  );
+  assert.match(parentCheck.textContent, /SO-0000002.*SO-0000002/);
+  assert.ok(parentCheck.classList.contains("comparison-match"));
+  assert.equal(
+    document.querySelector(".detail-kicker").textContent,
+    "SHIPMENT",
+  );
+  assert.equal(
+    document.querySelector("#detail-title").textContent,
+    "Shipment 00001",
+  );
+  assert.doesNotMatch(
+    document.querySelector(".detail-drawer").textContent,
+    /RO-|Rental order|Shipment Shipment/,
+  );
   dom.window.close();
 });
 
@@ -1460,9 +1498,8 @@ test("fixer compares the selected image with the target and blocks wrong custome
   const baseFields = {
     customer: "Demo Quartz Fabrication",
     address: "1161 Simulation Way",
-    work_order: null,
-    shipment: "901062",
-    rental_order: "RA-701062",
+    order_number: null,
+    parent_order_number: "RO-0000062",
     document_type: "Delivery Acknowledgement",
     page_number: 6,
     expected_pages: 6,
@@ -1480,10 +1517,9 @@ test("fixer compares the selected image with the target and blocks wrong custome
     const data = await response.json();
     if (path.endsWith("/tickets/ticket-0"))
       Object.assign(data, {
-        work_order: "W-991062",
+        order_number: "W-0000062",
         customer: "Demo Quartz Fabrication",
-        shipment: "901062",
-        rental_order: "RA-701062",
+        parent_order_number: "RO-0000062",
         billing_address: "1161 Simulation Way",
         download_ready: false,
         ocr_status: "partial",
@@ -1507,13 +1543,27 @@ test("fixer compares the selected image with the target and blocks wrong custome
             fields: { ...baseFields, page_number: 1 },
           },
           { id: "right-image", source_page: 31, fields: { ...baseFields } },
+          {
+            id: "mixed-families",
+            source_page: 32,
+            fields: { ...baseFields, mixed_order_types: true },
+          },
+          {
+            id: "sales-page",
+            source_page: 33,
+            fields: {
+              ...baseFields,
+              parent_order_number: "SO-0000002",
+              order_number: "Shipment 00001",
+            },
+          },
         ],
       });
     return { ok: true, json: async () => data };
   };
   findButton(document, "Dataset").click();
   await wait(30);
-  document.querySelector('[aria-label="View W-990120"]').click();
+  document.querySelector('[aria-label="View W-0000001"]').click();
   await wait(30);
   findButton(document, "OCR results").click();
   findButton(document, "Review in Flags").click();
@@ -1546,17 +1596,44 @@ test("fixer compares the selected image with the target and blocks wrong custome
   assert.equal(document.querySelector("#approve-page").disabled, false);
   assert.match(
     document.querySelector("#approve-page").textContent,
-    /source 31 → W-991062 · page 6/,
+    /source 31 → W-0000062 · page 6/,
   );
   assert.match(
-    document.querySelector('[data-check="shipment"]').textContent,
-    /901062/,
+    document.querySelector('[data-check="parent_order_number"]').textContent,
+    /RO-0000062/,
   );
   assert.match(
-    document.querySelector('[data-check="work_order"]').textContent,
-    /W-991062/,
+    document.querySelector('[data-check="order_number"]').textContent,
+    /W-0000062/,
   );
   assert.equal(document.querySelector("#fix-acknowledgment").hidden, true);
+  // A page printing both families is blocked even when every field agrees.
+  document.querySelector('[data-candidate-filter="different"]').click();
+  document.querySelector('[aria-label="Select source page 32"]').click();
+  assert.equal(document.querySelector("#approve-page").disabled, true);
+  assert.match(
+    document.querySelector(".comparison-error").textContent,
+    /rental and sales numbers on one page/i,
+  );
+  assert.equal(
+    document.querySelector('[data-check="parent_order_number"]').className,
+    "comparison-match",
+  );
+  assert.match(
+    document.querySelector(".page-fixer .page-fields-panel").textContent,
+    /Order conflictRental and sales numbers on one page/,
+  );
+  // A sales page never links to a work order: its SO and shipment differ.
+  document.querySelector('[aria-label="Select source page 33"]').click();
+  assert.equal(document.querySelector("#approve-page").disabled, true);
+  assert.match(
+    document.querySelector(".comparison-error").textContent,
+    /different order, work order\./i,
+  );
+  document.querySelector("#approve-page").click();
+  assert.equal(posted, false);
+  document.querySelector('[data-candidate-filter="possible"]').click();
+  document.querySelector('[aria-label="Select source page 31"]').click();
   assert.equal(document.querySelector(".detail-drawer"), drawer);
   assert.equal(requests.length, count); // Selection makes no workspace or OCR request.
   dom.window.close();
@@ -1613,7 +1690,7 @@ test("three different images are not presented as possible matches and uploading
   };
   findButton(document, "Dataset").click();
   await wait(30);
-  document.querySelector('[aria-label="View W-990120"]').click();
+  document.querySelector('[aria-label="View W-0000001"]').click();
   await wait(30);
   findButton(document, "OCR results").click();
   findButton(document, "Review in Flags").click();
@@ -1675,7 +1752,10 @@ test("three different images are not presented as possible matches and uploading
     }),
   });
   await wait(350);
-  assert.equal(document.querySelector("#detail-title").textContent, "W-990120");
+  assert.equal(
+    document.querySelector("#detail-title").textContent,
+    "W-0000001",
+  );
   assert.match(
     document.querySelector(".drawer-heading-actions").textContent,
     /Ready to download/,
@@ -1834,5 +1914,181 @@ test("ZIP download marks every included ticket and changes the ZIP action to Dow
   findButton(document, "Dataset").click();
   await wait(30);
   assert.equal(document.querySelectorAll("tbody .downloaded-mark").length, 2);
+  dom.window.close();
+});
+
+test("Order, Work order, Address lead the list and export, and a shipment sits under its sales order", async () => {
+  const { dom, document, window } = await boot();
+  findButton(document, "Dataset").click();
+  await wait(30);
+  assert.equal(document.querySelector(".panel h2").textContent, "Orders");
+  const search = document.querySelector('[aria-label="Search orders"]');
+  assert.equal(
+    search.placeholder,
+    "Search order, work order, shipment, customer, or address…",
+  );
+  assert.deepEqual(
+    [...document.querySelectorAll("thead th")].map((th) => th.textContent),
+    [
+      "Order",
+      "Work order",
+      "Address",
+      "Customer & location",
+      "Order status",
+      "OCR result",
+      "Due date",
+      "Download",
+    ],
+  );
+  const rental = [...document.querySelector("tbody tr").children];
+  assert.equal(rental[0].textContent, "RO-0000001");
+  assert.equal(rental[1].textContent, "W-0000001Rental");
+  assert.match(rental[2].textContent, /^200 Simulation Way, Demo City/);
+  let csv;
+  window.Blob = class {
+    constructor(parts) {
+      csv = parts.join("");
+    }
+  };
+  window.URL.createObjectURL = () => "blob:orders";
+  window.URL.revokeObjectURL = () => {};
+  findButton(document, "Export").click();
+  const lines = csv.split("\r\n");
+  assert.equal(
+    lines[0],
+    '"Order","Work order","Address","Order type","Customer","Delivery location","Status","OCR verified pages","Manually approved pages","Identified pages","Total pages","Reviewed"',
+  );
+  assert.match(
+    lines[1],
+    /^"RO-0000001","W-0000001","200 Simulation Way, Demo City","Rental",/,
+  );
+  assert.match(
+    lines[20],
+    /^"SO-0000002","Shipment 00001","219 Simulation Way, Demo City","Sale",/,
+  );
+  search.value = "Shipment 00001";
+  search.dispatchEvent(new window.Event("input", { bubbles: true }));
+  await wait(280);
+  const rows = document.querySelectorAll("tbody tr");
+  assert.equal(rows.length, 1);
+  const shipment = [...rows[0].children];
+  assert.equal(shipment[0].textContent, "SO-0000002");
+  assert.equal(shipment[1].textContent, "Shipment 00001Sale");
+  assert.match(shipment[2].textContent, /^219 Simulation Way, Demo City/);
+  assert.doesNotMatch(rows[0].textContent, /RO-|Rental|Not read/);
+  document.querySelector('[aria-label="View Shipment 00001"]').click();
+  await wait(30);
+  const drawer = document.querySelector(".detail-drawer");
+  assert.equal(drawer.querySelector(".detail-kicker").textContent, "SHIPMENT");
+  assert.equal(
+    drawer.querySelector("#detail-title").textContent,
+    "Shipment 00001",
+  );
+  const info = Object.fromEntries(
+    [...drawer.querySelectorAll(".detail-information .detail-field")].map(
+      (node) => [
+        node.querySelector("dt").textContent,
+        node.querySelector("dd").textContent,
+      ],
+    ),
+  );
+  assert.equal(info.Order, "SO-0000002");
+  assert.equal(info.Shipment, "Shipment 00001");
+  assert.equal("Work order" in info, false);
+  assert.doesNotMatch(drawer.textContent, /RO-|Rental order/);
+  document.querySelector('[aria-label="Close order"]').click();
+  const fetch = window.fetch;
+  const partial = {
+    download_ready: false,
+    ocr_status: "partial",
+    verified_pages: 5,
+    missing_pages: [2],
+  };
+  const sale = { ...tickets[19], ...partial };
+  const workOrder = { ...tickets[1], ...partial, missing_pages: [1] };
+  const unread = {
+    ...tickets[2],
+    ...partial,
+    parent_id: null,
+    parent_order_number: null,
+  };
+  const requested = [];
+  window.fetch = async (path, options) => {
+    const url = new URL(path, "http://localhost:8700");
+    requested.push(url.pathname);
+    let data;
+    if (url.pathname.endsWith("/tickets"))
+      data = { tickets: [sale, workOrder, unread], total: 3 };
+    else if (url.pathname.endsWith("/parent-orders"))
+      data = {
+        parent_orders: [
+          {
+            id: "ro-1",
+            parent_number: "RO-0000001",
+            order_type: "RENTAL",
+            customer: workOrder.customer,
+            address: workOrder.billing_address,
+            tickets: [workOrder],
+            ticket_count: 1,
+            ready_tickets: 0,
+            unassigned_pages: 0,
+          },
+          {
+            id: "so-2",
+            parent_number: "SO-0000002",
+            order_type: "SALE",
+            customer: sale.customer,
+            address: sale.billing_address,
+            tickets: [sale],
+            ticket_count: 1,
+            ready_tickets: 0,
+            unassigned_pages: 0,
+          },
+        ],
+        total: 2,
+      };
+    else return fetch(path, options);
+    return { ok: true, json: async () => data };
+  };
+  findButton(document, "Flags").click();
+  await wait(30);
+  assert.ok(
+    requested.includes("/api/workspaces/validation/parent-orders"),
+    "Flags reads the parent-orders endpoint",
+  );
+  const flags = document.querySelector("#flags-results");
+  assert.equal(flags.querySelectorAll(".parent-order-group").length, 2);
+  const salesGroup = flags.querySelector(
+    '.parent-order-group[data-parent-id="so-2"]',
+  );
+  assert.match(
+    salesGroup.querySelector("summary").textContent,
+    /^Sales order SO-00000021 shipments$/,
+  );
+  const child = salesGroup.querySelector('[data-order-id="ticket-19"]');
+  assert.match(child.querySelector("strong").textContent, /^Shipment 00001$/);
+  assert.equal(salesGroup.querySelectorAll("[data-order-id]").length, 1);
+  const rentalGroup = flags.querySelector(
+    '.parent-order-group[data-parent-id="ro-1"]',
+  );
+  assert.match(
+    rentalGroup.querySelector("summary").textContent,
+    /^Rental order RO-00000011 work orders$/,
+  );
+  assert.equal(
+    rentalGroup.querySelector('[data-order-id="ticket-1"] strong').textContent,
+    "Work order W-0000002",
+  );
+  const headings = [...flags.querySelectorAll("h2")].map((h) => h.textContent);
+  assert.deepEqual(headings, [
+    "Orders needing attention",
+    "Needs attention · order number not read",
+  ]);
+  const unreadSection = [...flags.querySelectorAll("section")].find((node) =>
+    /order number not read/.test(node.querySelector("h2").textContent),
+  );
+  assert.equal(unreadSection.querySelectorAll("[data-order-id]").length, 1);
+  assert.match(unreadSection.textContent, /Work order W-0000003/);
+  assert.doesNotMatch(flags.textContent, /Sales orders needing attention/);
   dom.window.close();
 });

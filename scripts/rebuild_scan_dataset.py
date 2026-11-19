@@ -19,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.create_demo_data import build_tickets, write_ticket_pdf
 from ocr_workspace import storage as db
 
-CASES = ('good', 'missing_identifier', 'good', 'unknown_shipment',
-         'missing_identifier', 'missing_page', 'unknown_shipment', 'good')
+CASES = ('good', 'missing_identifier', 'good', 'unknown_order',
+         'missing_identifier', 'missing_page', 'unknown_order', 'good')
 
 
 def build(destination, batch_count=8):
@@ -36,25 +36,25 @@ def build(destination, batch_count=8):
             source_pages = []
             records = []
             for index, ticket in enumerate(tickets[batch * 8:(batch + 1) * 8]):
-                path = Path(scratch) / f'{ticket.order_id}.pdf'
+                path = Path(scratch) / f'{ticket.order_id.replace(" ", "_")}.pdf'
                 pages = write_ticket_pdf(path, ticket, rasterize=True)
                 case = CASES[index]
                 with fitz.open(path) as original:
                     if case == 'missing_page':
                         original.delete_page(len(original) - 1)
                         pages = pages[:-1]
-                    elif case in {'missing_identifier', 'unknown_shipment'}:
+                    elif case in {'missing_identifier', 'unknown_order'}:
                         page = original[0]
                         page.add_redact_annot(fitz.Rect(306, 0, 612, 198), fill=(1, 1, 1))
                         page.apply_redactions()
-                        if case == 'unknown_shipment':
-                            page.insert_text((334, 47), 'Delivery Ticket / Shipment', fontsize=11)
-                            page.insert_text((334, 70), 'Shipment No. 88888888', fontsize=16)
+                        if case == 'unknown_order':
+                            page.insert_text((334, 47), 'SALES ORDER', fontsize=11)
+                            page.insert_text((334, 70), 'Sales Order No. SO-88888888 Shipment No. 88888', fontsize=12)
                     temporary = path.with_suffix('.part')
                     original.save(temporary, garbage=4, deflate=True)
                 temporary.replace(path)
                 record = json.loads(json.dumps(asdict(ticket), default=str))
-                record.update(rental_order=ticket.rental_order, test_case=case, pages=[])
+                record.update(order_type=ticket.order_type, test_case=case, pages=[])
                 records.append(record)
                 source_pages.extend((path, n, index, metadata) for n, metadata in enumerate(pages))
             random.Random(811 + batch).shuffle(source_pages)
@@ -76,7 +76,7 @@ def build(destination, batch_count=8):
         '# Shuffled multi-order scans\n\n'
         'Upload PDFs from incomming_scan through the app. Files are not watched.\n'
         '8 batches, 8 orders per batch, 47 pages per batch. Each batch contains '
-        '3 good orders, 2 blank identifier cases, 2 unknown shipment cases, and 1 missing-page case.\n'
+        '3 good orders, 2 blank identifier cases, 2 cases whose first page prints a different order number, and 1 missing-page case.\n'
         'flag_order receives copies and reports for scans needing attention.\n'
         'manifest.json maps every scan page to its original order and intended test case.\n')
     return manifest

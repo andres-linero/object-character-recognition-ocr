@@ -2,7 +2,7 @@
 
 ## Current Order Scanner demo
 
-The root [README](../README.md) now includes screenshots and short recordings of the current interface: complete OCR processing, flagged results, visual page repair and ZIP downloads. See the [media notes](media/order-scanner/README.md) for clip lengths and source intervals. These silent excerpts omit waiting time and use synthetic documents.
+The root [README](../README.md) now includes screenshots and short recordings of the interface: complete OCR processing, flagged results, visual page repair and ZIP downloads. See the [media notes](media/order-scanner/README.md) for clip lengths and source intervals. These silent excerpts omit waiting time and use synthetic documents. The recordings and screenshots predate the current [order numbering](demo-workflow.md#order-numbering) and show earlier labels.
 
 ## Historical recordings
 

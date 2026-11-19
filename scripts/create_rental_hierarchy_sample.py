@@ -1,4 +1,8 @@
-"""Create complete OD/RO/SO packets, with crop-miss or all-correct profiles."""
+"""Create shuffled sample scans, with crop-miss or all-correct profiles.
+
+Each batch holds 8 documents of six pages: 2 rental orders (RO-) with 3 work
+orders (W-) each, and 2 sales orders (SO-) with one shipment each.
+"""
 from dataclasses import asdict, replace
 import argparse
 import hashlib
@@ -29,27 +33,26 @@ def create(root, rasterize=True, batch_number=1, output_name=None, clean=False):
     incoming.mkdir(parents=True, exist_ok=True)
     offset = (batch_number - 1) * 8
     originals = build_tickets(8, seed=915 + batch_number, min_pages=6, max_pages=6, start_index=2001 + offset)
-    tickets = [replace(t, order_id=t.order_id.replace('W-', 'OD-'),
-        parent_rental_number=f'RO-{810001 + offset // 4 + index // 4}', shipment=str(904001 + offset // 2 + index // 2),
-        customer=originals[0].customer.removeprefix('Demo '), address=originals[(index // 4) * 4].address,
+    # build_tickets already yields three work orders per rental order followed by one shipment under a sales order.
+    tickets = [replace(t, customer=originals[0].customer.removeprefix('Demo '), address=originals[(index // 4) * 4].address,
         destination=originals[0].destination) for index, t in enumerate(originals)]
     records, sequence = [], []
     with tempfile.TemporaryDirectory(prefix='ocr-ro-sample-') as scratch:
         for index, ticket in enumerate(tickets):
-            path = Path(scratch) / f'{ticket.order_id}.pdf'
-            # Every page and number exists. Only the OD line moves, so RO/SO
-            # cannot silently substitute for an unreadable order in the crop.
+            path = Path(scratch) / f'{ticket.order_id.replace(" ", "_")}.pdf'
+            # Every page and number exists. Only the order line moves below the
+            # crop, so the rental order cannot silently stand in for its work order.
             offsets = {} if clean else {1: 64} if index == 2 else {6: 72} if index == 5 else {}
             metadata = write_ticket_pdf(path, ticket, rasterize, order_offsets=offsets)
             case = 'order_number_outside_crop' if offsets else 'good'
             record = json.loads(json.dumps(asdict(ticket), default=str))
-            record.update(rental_order=ticket.rental_order, test_case=case, sample_role='batch',
+            record.update(order_type=ticket.order_type, test_case=case, sample_role='batch',
                           sample_profile='all_correct' if clean else 'crop_misses',
                           shifted_order_pages=list(offsets), pages=[])
             records.append(record)
             sequence.extend((index, n, path, page) for n, page in enumerate(metadata))
         random.Random(915 + batch_number).shuffle(sequence)
-        output = incoming / (output_name or (f'batch_{batch_number:02d}_ALL_CORRECT_8_orders.pdf' if clean else 'rental_orders_RO_OD_SO_shuffled.pdf'))
+        output = incoming / (output_name or (f'batch_{batch_number:02d}_ALL_CORRECT_8_orders.pdf' if clean else 'rental_and_sales_orders_shuffled.pdf'))
         with fitz.open() as combined:
             for number, (index, page_number, path, metadata) in enumerate(sequence, 1):
                 with fitz.open(path) as pdf:
@@ -95,9 +98,9 @@ def create_batches(root, rasterize=True):
             print(f'Prepared batch {batch}/8', flush=True)
         data = json.loads((stage / 'Scans/manifest.json').read_text())
         first = stage / 'Scans/incomming_scan/batch_01_8_orders.pdf'
-        alias = stage / 'Scans/incomming_scan/rental_orders_RO_OD_SO_shuffled.pdf'
+        alias = stage / 'Scans/incomming_scan/rental_and_sales_orders_shuffled.pdf'
         shutil.copy2(first, alias)
-        alias_records = [dict(t, pdf='incomming_scan/rental_orders_RO_OD_SO_shuffled.pdf', sample_role='alias')
+        alias_records = [dict(t, pdf='incomming_scan/rental_and_sales_orders_shuffled.pdf', sample_role='alias')
                          for t in data['tickets'] if t['pdf'] == 'incomming_scan/batch_01_8_orders.pdf']
         data['tickets'].extend(alias_records)
         replaced = {t['pdf'] for t in data['tickets']}
@@ -130,10 +133,11 @@ def create_batches(root, rasterize=True):
         temporary.replace(manifest_path)
     (scans / 'README.md').write_text('# Current scan samples\n\n'
         'Upload batch_01_8_orders.pdf through batch_08_8_orders.pdf from incomming_scan.\n'
-        'Each has 2 ROs, 8 OD orders, 4 shared SO shipments and all 48 shuffled pages.\n'
-        'Per batch: 6 orders read normally; 2 have one OD line just below the fixed OCR crop.\n'
-        'All six pages exist for every order. In Flags, inspect the full-page OD and approve the correct image.\n'
-        'The rental_orders_RO_OD_SO_shuffled.pdf file is an identical alias of batch 1.\n'
+        'Each has 8 documents and 48 shuffled pages: 2 rental orders (RO-) with 3 work orders (W-) each,\n'
+        'and 2 sales orders (SO-) with one shipment each.\n'
+        'Per batch: 6 documents read normally; 2 have their work order or shipment line just below the fixed OCR crop.\n'
+        'All six pages exist for every document. In Flags, inspect the full page and approve the correct image.\n'
+        'The rental_and_sales_orders_shuffled.pdf file is an identical alias of batch 1.\n'
         'No database rows are preloaded. Existing uploaded originals, results and history are preserved.\n')
     return data, backup
 
@@ -152,7 +156,7 @@ if __name__ == '__main__':
     root = Path(__file__).resolve().parents[1]
     if args.all_batches:
         _, backup = create_batches(root)
-        print(f'8 batches, 64 OD orders, 16 ROs, 32 SO shipments, 384 pages; prior templates backed up in {backup}. Live workspace untouched.')
+        print(f'8 batches, 64 documents (16 ROs with 48 work orders, 16 SOs with 16 shipments), 384 pages; prior templates backed up in {backup}. Live workspace untouched.')
     else:
         output, records, _ = create(root, batch_number=batch_number, clean=args.clean)
-        print(f'{output}: 2 ROs, 8 OD orders, 4 SO shipments, 48 shuffled pages. No rows preloaded.')
+        print(f'{output}: 2 ROs with 6 work orders, 2 SOs with 2 shipments, 48 shuffled pages. No rows preloaded.')

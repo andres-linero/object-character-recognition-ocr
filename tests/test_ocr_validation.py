@@ -47,11 +47,19 @@ def test_staging_is_repeatable_and_preserves_source_packets(staged):
 
 def test_report_rejects_wrong_valid_order_as_mismatch(staged):
     store, todo = validation.prepare()
+    assert todo[0]["order_number"] == "W-0000076" and "shipment" not in todo[0]
     result = validation.write_report(todo, {
-        todo[0]["page_id"]: dict(status="success", identifier="900102"),
-        todo[1]["page_id"]: dict(status="error", identifier=None, error_code="HTTP401")})
-    assert result["mismatch"] == result["error"] == 1
-    assert result["passed"] == 0 and result["pending"] == 118
+        todo[0]["page_id"]: dict(status="success", identifier="W-0000077"),
+        todo[1]["page_id"]: dict(status="error", identifier=None, error_code="HTTP401"),
+        todo[2]["page_id"]: dict(status="success", identifier="W-0000076")})
+    assert result["mismatch"] == result["error"] == result["passed"] == 1
+    assert result["pending"] == 117
+    assert result["expected_tickets"] == 20
+    assert [page["expected"] for page in result["pages"][:3]] == ["W-0000076"] * 3
+    # Both batches hold work orders and shipments; each page is expected under its own document number.
+    assert {page["expected"][:2] for page in result["pages"]} == {"W-", "Sh"}
+    assert "Shipment 00026" in {page["expected"] for page in result["pages"]}
+    assert not any(page["expected"].startswith(("RO-", "SO-", "WO-")) for page in result["pages"])
     assert "test-only" not in validation.REPORT.read_text()
     store.close()
 

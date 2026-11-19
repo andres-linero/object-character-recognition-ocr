@@ -21,7 +21,7 @@ body:
     id: expected
     attributes:
       label: Expected identifiers
-      description: Identify OD, RO and SO separately.
+      description: For a rental page give the rental order (RO-0000002) and the work order (W-0000001). For a sales page give the sales order (SO-0000001) and the shipment (Shipment 00001).
     validations:
       required: true
   - type: textarea

@@ -17,7 +17,7 @@ Order Scanner automates document reading, order matching, completeness checks, a
 
 **Upload → Process → Review → Download** · [Watch the MP4](docs/media/order-scanner/ocr-complete.mp4)
 
-*An edited 17-second demo using synthetic documents; waiting time is omitted.*
+*An edited 17-second demo using synthetic documents; waiting time is omitted. The recordings and screenshots on this page predate the current order numbering and show earlier labels. Today a rental order (`RO-`) creates work orders (`W-`) and a sales order (`SO-`) creates shipments; see [order numbering](docs/demo-workflow.md#order-numbering).*
 
 ## Why I built it
 

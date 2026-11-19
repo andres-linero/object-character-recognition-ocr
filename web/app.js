@@ -134,13 +134,29 @@ async function api(path, options) {
   return response.json();
 }
 const base = () => `/api/workspaces/${encodeURIComponent(state.dataset)}`;
-function rentalNumber(record) {
-  return (
-    (record?.parent_rental_number || record?.rental_order || "").replace(
-      /^RA-/i,
-      "RO-",
-    ) || null
-  );
+// Order model: a parent order (Rental order RO-… or Sales order SO-…) creates
+// documents: work orders (W-…) for a rental, shipments (Shipment …) for a sale.
+function parentNumber(record) {
+  return record?.parent_order_number || null;
+}
+const isSaleNumber = (number) => /^SO-/i.test(number || "");
+// Works for tickets and parent orders; falls back to the parent number prefix.
+const isSale = (record) =>
+  record?.order_type
+    ? record.order_type === "SALE"
+    : isSaleNumber(record?.parent_number || record?.parent_order_number);
+const documentWord = (record) => (isSale(record) ? "Shipment" : "Work order");
+function orderLabel(ticket) {
+  const number = ticket.order_number || "";
+  if (/^shipment\b/i.test(number)) return number;
+  return `${documentWord(ticket)} ${number}`.trim();
+}
+function parentLabel(parent) {
+  const word = isSale(parent) ? "Sales order" : "Rental order";
+  return parent.parent_number ? `${word} ${parent.parent_number}` : word;
+}
+function orderTypeLabel(ticket) {
+  return isSale(ticket) ? "Sale" : "Rental";
 }
 function rememberDownloads(tickets) {
   state.downloads = Object.fromEntries(
@@ -262,8 +278,8 @@ function ticketDownloadControl(
       `${base()}/tickets/${ticket.id}/download`,
       ticket.downloaded ? "Download again" : label,
       ticket.downloaded ? `${className} download-again` : className,
-      `${ticket.work_order}.pdf`,
-      `${ticket.downloaded ? "Download again" : "Download"} ${ticket.work_order}`,
+      `${ticket.order_number}.pdf`,
+      `${ticket.downloaded ? "Download again" : "Download"} ${ticket.order_number}`,
     ),
   );
 }
@@ -310,7 +326,7 @@ function datasetControl() {
     "span",
     { class: "dataset-control", "aria-label": "Dataset" },
     icon("grid"),
-    `${state.summary.rental_orders ? `${state.summary.rental_orders} rental orders · ` : ""}${state.summary.tickets ?? 0} tickets`,
+    `${state.summary.parent_orders ? `${state.summary.parent_orders} orders · ` : ""}${state.summary.tickets ?? 0} tickets`,
   );
 }
 function heading(title, subtitle, actions = []) {
@@ -881,12 +897,12 @@ function summaryCards() {
 }
 function exportTickets() {
   const cols = [
-    "Rental order (RO)",
-    "Order number",
-    "Shipment",
+    "Order",
+    "Work order",
+    "Address",
+    "Order type",
     "Customer",
     "Delivery location",
-    "Billing address",
     "Status",
     "OCR verified pages",
     "Manually approved pages",
@@ -895,12 +911,12 @@ function exportTickets() {
     "Reviewed",
   ];
   const rows = state.tickets.map((t) => [
-    t.parent_rental_number || "",
-    t.work_order,
-    t.shipment,
+    parentNumber(t) || "",
+    t.order_number,
+    t.billing_address,
+    isSale(t) ? "Sale" : "Rental",
     t.customer,
     t.delivery_location,
-    t.billing_address,
     t.status,
     t.ocr_verified_pages ?? t.verified_pages,
     t.manually_approved_pages || 0,
@@ -919,7 +935,7 @@ function exportTickets() {
   const a = el("a", { href: url, download: "order-tracker.csv" });
   a.click();
   URL.revokeObjectURL(url);
-  toast(`Exported ${rows.length} work orders`);
+  toast(`Exported ${rows.length} orders`);
 }
 function empty(title, message, action) {
   return el(
@@ -941,8 +957,8 @@ function pageGapMessage(ticket) {
   if (ticket.page_gap_status === "processing" || ticket.processing)
     return `Pages ${pages.join(", ")} have not been identified yet; this scan is still processing.`;
   const unidentified = ticket.unidentified_scan_pages?.length || 0;
-  const scope = ticket.parent_rental_number
-    ? `under ${ticket.parent_rental_number}`
+  const scope = ticket.parent_order_number
+    ? `under ${ticket.parent_order_number}`
     : "in the same scan";
   return `Not identified for this order: pages ${pages.join(", ")}.${unidentified ? ` ${unidentified} unassigned page(s) remain ${scope}. A page may be present but unmatched; review those pages before treating it as absent.` : " This does not by itself prove the image is absent."}`;
 }
@@ -955,7 +971,7 @@ function unidentifiedScanEvidence(ticket) {
     el(
       "summary",
       {},
-      `${pages.length} unassigned page(s) ${ticket.parent_rental_number ? `under ${ticket.parent_rental_number}` : "in the same scan"}`,
+      `${pages.length} unassigned page(s) ${ticket.parent_order_number ? `under ${ticket.parent_order_number}` : "in the same scan"}`,
     ),
     el(
       "p",
@@ -1023,7 +1039,7 @@ function rowFor(ticket) {
     "tr",
     {
       tabindex: "0",
-      "aria-label": `Open ${ticket.work_order}`,
+      "aria-label": `Open ${ticket.order_number}`,
       onClick: () => openDetail(ticket.id),
       onKeydown: (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -1032,7 +1048,7 @@ function rowFor(ticket) {
         }
       },
     },
-    el("td", { class: "mono" }, rentalNumber(ticket) || "Not read"),
+    el("td", { class: "mono" }, parentNumber(ticket) || "Not read"),
     el(
       "td",
       {},
@@ -1043,10 +1059,18 @@ function rowFor(ticket) {
         el(
           "div",
           {},
-          el("strong", { class: "mono order-number" }, ticket.work_order),
-          el("small", {}, `Shipment ${ticket.shipment}`),
+          el("strong", { class: "mono order-number" }, ticket.order_number),
+          el("small", {}, orderTypeLabel(ticket)),
         ),
       ),
+    ),
+    el(
+      "td",
+      { class: "address-cell" },
+      ticket.billing_address
+        ? el("span", {}, ticket.billing_address)
+        : el("span", { class: "muted" }, "Not provided"),
+      el("small", {}, "Billing address"),
     ),
     el(
       "td",
@@ -1067,14 +1091,6 @@ function rowFor(ticket) {
           ),
         ),
       ),
-    ),
-    el(
-      "td",
-      { class: "address-cell" },
-      ticket.billing_address
-        ? el("span", {}, ticket.billing_address)
-        : el("span", { class: "muted" }, "Not provided"),
-      el("small", {}, "Billing address"),
     ),
     el(
       "td",
@@ -1114,7 +1130,7 @@ function rowFor(ticket) {
         "button",
         {
           class: "icon-button",
-          "aria-label": `View ${ticket.work_order}`,
+          "aria-label": `View ${ticket.order_number}`,
           onClick: (event) => {
             event.stopPropagation();
             openDetail(ticket.id);
@@ -1139,8 +1155,8 @@ function table() {
           ? "No verified orders yet"
           : "No orders found",
         state.query
-          ? "Try another order number, customer, or address."
-          : "There are no work orders in this view.",
+          ? "Try another order, work order, shipment, customer, or address."
+          : "There are no orders in this view.",
         button("Show all orders", () => {
           state.query = "";
           state.filter = "all";
@@ -1159,10 +1175,10 @@ function table() {
       "tr",
       {},
       ...[
-        "Rental order (RO)",
-        "Order number",
-        "Customer & location",
+        "Order",
+        "Work order",
         "Address",
+        "Customer & location",
         "Order status",
         "OCR result",
         "Due date",
@@ -1180,7 +1196,7 @@ function table() {
         el(
           "caption",
           { class: "sr-only" },
-          "Work orders from the SQL tracker. Select a row to inspect documents and OCR results.",
+          "Orders from the SQL tracker. Select a row to inspect documents and OCR results.",
         ),
         header,
         el("tbody", {}, rows.map(rowFor)),
@@ -1259,7 +1275,7 @@ function orderTracker() {
   main.replaceChildren(
     heading(
       "Order Tracker",
-      "Every work order, document, and OCR result. In one place.",
+      "Every order, document, and OCR result. In one place.",
       [
         datasetControl(),
         button("Export", exportTickets, "button secondary", "down"),
@@ -1275,7 +1291,7 @@ function orderTracker() {
       el(
         "div",
         {},
-        el("h2", {}, "Work orders"),
+        el("h2", {}, "Orders"),
         el(
           "span",
           { class: "panel-subtitle" },
@@ -1332,8 +1348,8 @@ function orderTracker() {
   const input = el("input", {
     type: "search",
     value: state.query,
-    placeholder: "Search work order, customer, shipment, or address…",
-    "aria-label": "Search work orders",
+    placeholder: "Search order, work order, shipment, customer, or address…",
+    "aria-label": "Search orders",
     onInput: (event) => {
       state.query = event.target.value;
       clearTimeout(state.searchTimer);
@@ -1406,13 +1422,13 @@ async function refreshTracker() {
   const view = state.view;
   const filters = query().toString();
   try {
-    const [summary, tickets, activity, rentals] = await Promise.all([
+    const [summary, tickets, activity, parents] = await Promise.all([
       api(base()),
       getTickets(),
       view === "flags"
         ? api(`${base()}/activity?issues_only=true`)
         : Promise.resolve(null),
-      view === "flags" ? api(`${base()}/rental-orders`) : Promise.resolve(null),
+      view === "flags" ? api(`${base()}/parent-orders`) : Promise.resolve(null),
     ]);
     if (
       generation !== state.request ||
@@ -1429,7 +1445,7 @@ async function refreshTracker() {
     updateTable();
     if (activity) {
       state.scanCounts = activity;
-      state.rentalOrders = rentals?.rental_orders || state.rentalOrders || [];
+      state.parentOrders = parents?.parent_orders || state.parentOrders || [];
       document.querySelector("#flags-results")?.replaceWith(flagsResults());
     }
     if (view === "flags" && state.detail && !state.approvingPage) {
@@ -1498,8 +1514,8 @@ async function loadView() {
   try {
     state.summary = await api(base());
     state.scanCounts = await api(`${base()}/activity`);
-    const rentals = await api(`${base()}/rental-orders`);
-    state.rentalOrders = rentals.rental_orders || [];
+    const parents = await api(`${base()}/parent-orders`);
+    state.parentOrders = parents.parent_orders || [];
     if (generation !== state.request) return;
     navigation();
     if (["tickets", "flags"].includes(state.view)) {
@@ -1639,7 +1655,7 @@ function overviewOrderResults() {
           el(
             "strong",
             { class: "overview-order-label" },
-            `${ticket.customer.replace(/^Demo\s+/i, "")} · ${ticket.work_order}`,
+            `${ticket.customer.replace(/^Demo\s+/i, "")} · ${ticket.order_number}`,
           ),
           badge(
             key === "ready" ? "Approved" : "In review",
@@ -1662,27 +1678,27 @@ async function refreshOverviewOrders() {
   if (state.view !== "overview") return;
   const generation = state.request;
   try {
-    const [result, activity, rentals] = await Promise.all([
+    const [result, activity, parents] = await Promise.all([
       api(`${base()}/tickets`),
       api(`${base()}/activity`),
-      api(`${base()}/rental-orders`),
+      api(`${base()}/parent-orders`),
     ]);
     if (generation !== state.request || state.view !== "overview") return;
     const previous = JSON.stringify([
       state.tickets,
       state.scanCounts?.counts,
-      state.rentalOrders,
+      state.parentOrders,
     ]);
     state.tickets = result.tickets;
     rememberDownloads(result.tickets);
     state.scanCounts = activity;
-    state.rentalOrders = rentals.rental_orders || [];
+    state.parentOrders = parents.parent_orders || [];
     if (
       previous !==
       JSON.stringify([
         state.tickets,
         state.scanCounts?.counts,
-        state.rentalOrders,
+        state.parentOrders,
       ])
     )
       document
@@ -1744,11 +1760,7 @@ function orderResultGroup(ticket) {
     el(
       "div",
       { class: "overview-order-info" },
-      el(
-        "strong",
-        {},
-        `${ticket.work_order} · Shipment ${ticket.shipment || "not read"}`,
-      ),
+      el("strong", {}, orderLabel(ticket)),
       el(
         "small",
         {},
@@ -1822,56 +1834,62 @@ function orderResultGroup(ticket) {
     "data-order-id": ticket.id,
   });
 }
-function rentalResultGroup(rental, tickets, scope, additional = []) {
-  const allChildren = rental.tickets || tickets;
-  const content = el("div", { class: "rental-child-groups" });
+function parentResultGroup(parent, tickets, scope, additional = []) {
+  const allChildren = parent.tickets || tickets;
+  const documents = isSale(parent) ? "shipments" : "work orders";
+  const content = el("div", { class: "parent-child-groups" });
   if (scope === "ready" && allChildren.some(isReadyOrder))
     content.append(
       el(
         "div",
-        { class: "rental-actions" },
+        { class: "parent-actions" },
         el(
           "a",
           {
             class: "button secondary",
-            href: `${base()}/rental-orders/${rental.id}/download.zip`,
+            href: `${base()}/parent-orders/${encodeURIComponent(parent.id)}/download.zip`,
           },
           icon("down"),
-          "Download ready TKs ZIP",
+          `Download ready ${documents} ZIP`,
         ),
       ),
     );
   for (const ticket of tickets) content.append(orderResultGroup(ticket));
   content.append(...additional);
   return resultDisclosure(
-    `rental:${rental.id}:${scope}`,
+    `parent:${parent.id}:${scope}`,
     el(
       "summary",
       { class: "order-result-summary" },
       el(
         "div",
         { class: "overview-order-info" },
-        el("strong", {}, rental.rental_number),
+        el("strong", {}, parentLabel(parent)),
         el(
           "small",
           {},
-          `${allChildren.length} work orders · ${new Set(allChildren.map((t) => t.shipment).filter(Boolean)).size} shipments${rental.unassigned_pages ? ` · ${rental.unassigned_pages} unassigned images` : ""}`,
+          `${allChildren.length} ${documents}${parent.unassigned_pages ? ` · ${parent.unassigned_pages} unassigned images` : ""}`,
         ),
       ),
       icon("chevron"),
     ),
     content,
     {
-      "data-rental-id": rental.id,
-      class: "order-result-group rental-order-group",
+      "data-parent-id": parent.id,
+      class: "order-result-group parent-order-group",
     },
   );
 }
-function rentalMetadata(id, fallback) {
+function parentMetadata(key, fallback) {
   return (
-    (state.rentalOrders || []).find((r) => r.id === id) || {
-      id,
-      rental_number: fallback.parent_rental_number,
+    (state.parentOrders || []).find(
+      (parent) => parent.id === key || parent.parent_number === key,
+    ) || {
+      id: fallback.parent_id || key,
+      parent_number: fallback.parent_order_number,
+      order_type:
+        fallback.order_type ||
+        (isSaleNumber(fallback.parent_order_number) ? "SALE" : "RENTAL"),
       customer: fallback.customer,
     }
   );
@@ -1895,7 +1913,7 @@ function flaggedPageGroup(key, pages, label) {
           el(
             "strong",
             {},
-            `Source page ${row.page} · ${row.parent_rental_number ? "RO identified, ticket needs review" : row.status === "error" ? "OCR failed" : "Needs identification"}`,
+            `Source page ${row.page} · ${row.parent_order_number ? (isSaleNumber(row.parent_order_number) ? "SO identified, shipment needs review" : "RO identified, work order needs review") : row.status === "error" ? "OCR failed" : "Needs identification"}`,
           ),
           el(
             "small",
@@ -1938,7 +1956,7 @@ function flagsView() {
   main.replaceChildren(
     heading(
       "Flags",
-      "Rental orders stay grouped even when a TK/work-order number is missing.",
+      "Orders stay grouped even when a work order or shipment number is missing.",
       [datasetControl()],
     ),
     flagsResults(),
@@ -1957,27 +1975,25 @@ function flagsResults() {
         { class: "panel" },
         empty(
           "No flags",
-          "Incomplete tickets and unassigned RO pages will appear here after processing.",
+          "Incomplete orders and unassigned pages will appear here after processing.",
         ),
       ),
     );
     return result;
   }
+  // Documents and unassigned pages group under their parent order (RO or SO).
+  const parentKey = (record) =>
+    record.parent_id || record.parent_order_number || null;
   const parents = new Map();
-  for (const ticket of orders.filter((t) => t.rental_id)) {
-    if (!parents.has(ticket.rental_id))
-      parents.set(ticket.rental_id, {
-        tickets: [],
-        pages: [],
-        fallback: ticket,
-      });
-    parents.get(ticket.rental_id).tickets.push(ticket);
-  }
-  for (const row of issues.filter((p) => p.rental_id)) {
-    if (!parents.has(row.rental_id))
-      parents.set(row.rental_id, { tickets: [], pages: [], fallback: row });
-    parents.get(row.rental_id).pages.push(row);
-  }
+  const group = (record) => {
+    const key = parentKey(record);
+    if (!parents.has(key))
+      parents.set(key, { tickets: [], pages: [], fallback: record });
+    return parents.get(key);
+  };
+  for (const ticket of orders.filter(parentKey))
+    group(ticket).tickets.push(ticket);
+  for (const row of issues.filter(parentKey)) group(row).pages.push(row);
   if (parents.size) {
     const section = el(
       "section",
@@ -1985,30 +2001,34 @@ function flagsResults() {
       el(
         "div",
         { class: "section-heading" },
-        el("h2", {}, "Rental orders needing attention"),
+        el("h2", {}, "Orders needing attention"),
       ),
     );
-    for (const [id, group] of parents)
+    for (const [key, entry] of parents) {
+      const parent = parentMetadata(key, entry.fallback);
       section.append(
-        rentalResultGroup(
-          rentalMetadata(id, group.fallback),
-          group.tickets,
+        parentResultGroup(
+          parent,
+          entry.tickets,
           "flags",
-          group.pages.length
+          entry.pages.length
             ? [
                 flaggedPageGroup(
-                  id,
-                  group.pages,
-                  "Unassigned TK/work-order pages",
+                  key,
+                  entry.pages,
+                  isSale(parent)
+                    ? "Unassigned shipment pages"
+                    : "Unassigned work order pages",
                 ),
               ]
             : [],
         ),
       );
+    }
     result.append(section);
   }
-  const legacy = orders.filter((t) => !t.rental_id);
-  if (legacy.length)
+  const unparented = orders.filter((t) => !parentKey(t));
+  if (unparented.length)
     result.append(
       el(
         "section",
@@ -2016,14 +2036,14 @@ function flagsResults() {
         el(
           "div",
           { class: "section-heading" },
-          el("h2", {}, "Orders needing attention · RO not read"),
-          badge(`${legacy.length} orders`, "amber"),
+          el("h2", {}, "Needs attention · order number not read"),
+          badge(`${unparented.length} orders`, "amber"),
         ),
-        ...legacy.map(orderResultGroup),
+        ...unparented.map(orderResultGroup),
       ),
     );
   const scans = new Map();
-  for (const row of issues.filter((p) => !p.rental_id)) {
+  for (const row of issues.filter((p) => !parentKey(p))) {
     const key = row.document_id || row.document || "scan";
     if (!scans.has(key)) scans.set(key, []);
     scans.get(key).push(row);
@@ -2035,7 +2055,7 @@ function flagsResults() {
       el(
         "div",
         { class: "section-heading" },
-        el("h2", {}, "Unidentified pages · RO not read"),
+        el("h2", {}, "Unidentified pages"),
       ),
     );
     let number = 0;
@@ -2049,7 +2069,7 @@ function imports(rows) {
   main.replaceChildren(
     heading(
       "Ingestion history",
-      "See how source trackers became organized work orders.",
+      "See how source trackers became organized orders.",
       [datasetControl()],
     ),
   );
@@ -2144,7 +2164,7 @@ function imports(rows) {
       "p",
       { class: "tracker-footnote" },
       icon("shield"),
-      "Repeat imports update existing records without duplicating your work orders.",
+      "Repeat imports update existing records without duplicating your orders.",
     ),
   );
 }
@@ -2166,13 +2186,13 @@ async function openDetail(id, initialTab = "details") {
         class: "detail-drawer",
         role: "dialog",
         "aria-modal": "true",
-        "aria-label": "Work order details",
+        "aria-label": "Order details",
       },
       el(
         "div",
         { class: "loading-state" },
         el("span", { class: "spinner" }),
-        "Opening work order…",
+        "Opening order…",
       ),
     ),
   );
@@ -2216,30 +2236,26 @@ function pageFieldsPanel(page, collapsible = false) {
       not_determined: "Not determined from this page",
     }[fields.signature_status] || "Not determined from this page";
   const title = `Extracted details · source page ${page.source_page || page.page || page.number}`;
+  const salePage =
+    /^shipment\b/i.test(fields.order_number || "") ||
+    isSaleNumber(fields.parent_order_number);
   const grid = el(
     "dl",
     { class: "detail-grid page-fields-grid" },
     field("Customer", fields.customer || "Not read"),
-    !fields.work_order?.startsWith("OD-")
+    field("Order", parentNumber(fields) || "Not read", "mono-value"),
+    field(
+      salePage ? "Shipment" : "Work order",
+      fields.order_number || "Not read",
+      "mono-value",
+    ),
+    fields.mixed_order_types
       ? field(
-          "Customer order #",
-          fields.customer_order_number || "Not read",
-          "mono-value",
+          "Order conflict",
+          "Rental and sales numbers on one page",
+          "page-field-wide",
         )
       : null,
-    field(
-      fields.work_order?.startsWith("OD-")
-        ? "Order number (OD)"
-        : "Ticket / work order",
-      fields.work_order || "Not read",
-      "mono-value",
-    ),
-    field("Shipment / SO", fields.shipment || "Not read", "mono-value"),
-    field(
-      "Rental order (RO)",
-      rentalNumber(fields) || "Not read",
-      "mono-value",
-    ),
     field("Billing address", fields.address || "Not read", "page-field-wide"),
     field("Delivery location", fields.destination || "Not read"),
     field("Delivery address / dispatch", fields.delivery_address || "Not read"),
@@ -2281,13 +2297,8 @@ function detailInfo(ticket) {
   const grid = el(
     "dl",
     { class: "detail-grid" },
-    field(
-      "Rental order (RO)",
-      rentalNumber(ticket) || "Not read",
-      "mono-value",
-    ),
-    field("Order number", ticket.work_order, "mono-value"),
-    field("Shipment number", ticket.shipment, "mono-value"),
+    field("Order", parentNumber(ticket) || "Not read", "mono-value"),
+    field(documentWord(ticket), ticket.order_number, "mono-value"),
     field("Order date", date(ticket.order_date)),
     field("Due date", date(ticket.due_date)),
     field("Assigned to", ticket.assigned_to),
@@ -2465,8 +2476,8 @@ async function toggleReview() {
     ticket.reviewed = !ticket.reviewed;
     toast(
       ticket.reviewed
-        ? "Work order marked as reviewed"
-        : "Work order returned to review queue",
+        ? "Order marked as reviewed"
+        : "Order returned to review queue",
     );
     renderDetail();
     await loadView();
@@ -2486,61 +2497,52 @@ function pageComparison(page, printedPage = state.fixPrintedPage) {
       .trim()
       .toLowerCase();
     if (key === "customer") text = text.replace(/^demo\s+/, "");
-    if (key === "shipment" && /^\d+$/.test(text))
-      return text.replace(/^0+/, "") || "0";
     return text.replace(/[^\p{L}\p{N}_]/gu, "");
   };
   const checks = [
     ["customer", "Customer", t.customer, f.customer],
     ["address", "Address", t.billing_address, f.address],
     [
-      "customer_order_number",
-      "Customer order #",
-      t.customer_order_number,
-      f.customer_order_number,
+      "parent_order_number",
+      "Order",
+      t.parent_order_number,
+      f.parent_order_number,
     ],
-    [
-      "parent_rental_number",
-      "Rental order (RO)",
-      rentalNumber(t),
-      rentalNumber(f),
-    ],
-    ["work_order", "Order number", t.work_order, f.work_order],
-    ["shipment", "Shipment / SO", t.shipment, f.shipment],
+    ["order_number", "Work order", t.order_number, f.order_number],
     ["page_number", "Printed page", printedPage, f.page_number],
     ["expected_pages", "Page total", t.expected_pages, f.expected_pages],
-  ]
-    .filter(
-      ([key]) =>
-        key !== "customer_order_number" || !t.work_order?.startsWith("OD-"),
-    )
-    .map(([key, label, expected, found]) => {
-      const status =
-        found == null || found === ""
-          ? "not_read"
-          : expected == null || expected === ""
-            ? "no_target"
-            : normalize(found, key) === normalize(expected, key)
-              ? "match"
-              : "different";
-      return {
-        key,
-        label,
-        expected,
-        found,
-        status,
-        blocking: key !== "shipment" && status === "different",
-      };
-    });
+  ].map(([key, label, expected, found]) => {
+    const status =
+      found == null || found === ""
+        ? "not_read"
+        : expected == null || expected === ""
+          ? "no_target"
+          : normalize(found, key) === normalize(expected, key)
+            ? "match"
+            : "different";
+    return {
+      key,
+      label,
+      expected,
+      found,
+      status,
+      blocking: status === "different",
+    };
+  });
   const identified = checks.some(
     (c) =>
       c.status === "match" &&
-      !["shipment", "page_number", "expected_pages"].includes(c.key),
+      !["page_number", "expected_pages"].includes(c.key),
   );
+  // Same rules as the server: every different check blocks, and so does a page
+  // that prints both rental and sales numbers.
+  const conflicts = checks.filter((c) => c.blocking).map((c) => c.label);
+  if (f.mixed_order_types)
+    conflicts.push("Rental and sales numbers on one page");
   return {
     checks,
-    blocked: checks.some((c) => c.blocking),
-    conflicts: checks.filter((c) => c.blocking).map((c) => c.label),
+    blocked: conflicts.length > 0,
+    conflicts,
     differences: checks
       .filter((c) => c.status === "different" && !c.blocking)
       .map((c) => c.label),
@@ -2569,7 +2571,7 @@ function selectedPageReview(page, isFix = state.detailTab === "fix") {
       "h3",
       {},
       isFix
-        ? `Source ${page.source_page} → ${state.detail.work_order} · page ${state.fixPrintedPage}`
+        ? `Source ${page.source_page} → ${state.detail.order_number} · page ${state.fixPrintedPage}`
         : `Source ${page.source_page} · field checks`,
     ),
     el(
@@ -2649,7 +2651,7 @@ function updateApprovalControls() {
     control.textContent = state.approvingPage
       ? "Linking image…"
       : chosen
-        ? `Link source ${chosen.source_page} → ${ticket.work_order} · page ${state.fixPrintedPage}`
+        ? `Link source ${chosen.source_page} → ${ticket.order_number} · page ${state.fixPrintedPage}`
         : "Select an image to link";
     control.disabled =
       !!state.approvingPage ||
@@ -2841,7 +2843,7 @@ function updatePageSelection() {
     if (image.getAttribute("src") !== src) image.setAttribute("src", src);
     image.alt = isFix
       ? `Unidentified source page ${page.source_page}`
-      : `${page.paper}, ${page.copy || ""} copy, ${ticket.work_order}, page ${page.printed_page || page.number || index + 1}`;
+      : `${page.paper}, ${page.copy || ""} copy, ${ticket.order_number}, page ${page.printed_page || page.number || index + 1}`;
     const caption = selectionCaption(page, isFix);
     if (preview.querySelector(".preview-caption"))
       preview.querySelector(".preview-caption").replaceWith(caption);
@@ -2881,9 +2883,9 @@ function pageFixer(ticket) {
     el(
       "h3",
       {},
-      ticket.parent_rental_number
-        ? `${ticket.parent_rental_number} → ${ticket.work_order}`
-        : `Complete ${ticket.work_order}`,
+      ticket.parent_order_number
+        ? `${ticket.parent_order_number} → ${ticket.order_number}`
+        : `Complete ${ticket.order_number}`,
     ),
     el(
       "p",
@@ -2896,7 +2898,7 @@ function pageFixer(ticket) {
       el(
         "strong",
         {},
-        `${ticket.work_order} · ${ticket.customer.replace(/^Demo\s+/i, "")}`,
+        `${ticket.order_number} · ${ticket.customer.replace(/^Demo\s+/i, "")}`,
       ),
       el("p", {}, ticket.billing_address || "Address not recorded"),
     ),
@@ -3058,7 +3060,7 @@ function pageFixer(ticket) {
     state.approvingPage
       ? "Approving…"
       : chosen
-        ? `Link source ${chosen.source_page} → ${ticket.work_order} · page ${state.fixPrintedPage}`
+        ? `Link source ${chosen.source_page} → ${ticket.order_number} · page ${state.fixPrintedPage}`
         : "Select an image to approve",
     approveFixPage,
     "button primary",
@@ -3181,7 +3183,7 @@ function renderDetail(initial = false) {
       : null
     : t.pages[state.pageIndex];
   const close = button("", closeDetail, "icon-button", "close");
-  close.setAttribute("aria-label", "Close work order");
+  close.setAttribute("aria-label", "Close order");
   const review = button(
     t.reviewed ? "Reviewed" : "Mark reviewed",
     toggleReview,
@@ -3230,7 +3232,7 @@ function renderDetail(initial = false) {
     el(
       "div",
       { class: "drawer-toolbar" },
-      el("span", {}, "Order Tracker", icon("chevron"), t.work_order),
+      el("span", {}, "Order Tracker", icon("chevron"), t.order_number),
       close,
     ),
     el(
@@ -3242,9 +3244,9 @@ function renderDetail(initial = false) {
         el(
           "div",
           { class: "detail-kicker" },
-          t.work_order?.startsWith("OD-") ? "ORDER" : "WORK ORDER",
+          isSale(t) ? "SHIPMENT" : "WORK ORDER",
         ),
-        el("h2", { id: "detail-title" }, t.work_order),
+        el("h2", { id: "detail-title" }, t.order_number),
         el("p", {}, t.customer),
       ),
       el(
@@ -3345,14 +3347,14 @@ function renderDetail(initial = false) {
                 src: `${base()}/pages/${page.id}/preview`,
                 alt: isFix
                   ? `Unidentified source page ${page.source_page}`
-                  : `${page.paper}, ${page.copy || ""} copy, ${t.work_order}, page ${page.printed_page || page.number || state.pageIndex + 1}`,
+                  : `${page.paper}, ${page.copy || ""} copy, ${t.order_number}, page ${page.printed_page || page.number || state.pageIndex + 1}`,
               }),
             )
           : empty(
               isFix ? "Select an unidentified image" : "No pages available",
               isFix
                 ? "Choose a thumbnail in the image notebook to compare it with this order."
-                : "This work order has no registered documents.",
+                : "This order has no registered documents.",
             ),
         page
           ? el(

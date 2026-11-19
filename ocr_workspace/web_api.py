@@ -27,7 +27,7 @@ from . import storage as db
 from .intake_watcher import ProgressState
 from .ticket_names import ticket_filename
 from .document_data import page_field_records
-from .page_review import compare_page, unify_rental_fields, rental_number
+from .page_review import compare_page, parent_type
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -128,14 +128,15 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 data = json.loads(path.read_text())
                 if data.get("synthetic") is True and data.get("generator") == "ocr-synthetic-demo-v1":
                     for ticket in data["tickets"]:
-                        result[(ticket["order_id"], ticket["shipment"])] = ticket
+                        result[ticket["order_id"]] = ticket
         return result
 
     def all_tickets(store):
         extras = {} if live else enrichments()
         extracted_fields = page_field_records(store)
-        page_fields = {r['id']: unify_rental_fields(r['payload']) for r in store.rows(select(db.raw_rows).where(db.raw_rows.c.sheet == 'document_fields'))}
-        detected_extras = {(r['work_order'], r['shipment']): r for r in page_fields.values()}
+        page_fields = {r['id']: r['payload'] for r in store.rows(select(db.raw_rows).where(db.raw_rows.c.sheet == 'document_fields'))}
+        # Page evidence saved before the single-order-number model has no order_number.
+        detected_extras = {r['order_number']: r for r in page_fields.values() if r.get('order_number')}
         reconciled = {r["database_id"]: r for r in store.reconciliation_rows()}
         review_state = {}
         download_records = {}
@@ -182,7 +183,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
         tickets = []
         for row in store.order_rows():
             document_driven = row['Source_Sheet'] == 'document_fields'
-            extra = unify_rental_fields((detected_extras if document_driven else extras).get((row["Order_ID"], row["SO"]), {}))
+            extra = (detected_extras if document_driven else extras).get(row["Order_ID"], {})
             state = reconciled.get(row["database_id"], {})
             total = row["Expected_Pages"] or state.get("Manifest_Pages", 0)
             membership = memberships.get(row["database_id"], {"synthetic_manifest": set(), "azure_ocr": set()})
@@ -223,12 +224,10 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 for p in selected_ids)
             version = hashlib.sha256(json.dumps(content_pages, separators=(',', ':')).encode()).hexdigest()
             receipts = download_records.get((row['database_id'], version), []) if ready else []
-            tickets.append(dict(id=row["database_id"], work_order=row["Order_ID"], shipment=row["SO"],
+            tickets.append(dict(id=row["database_id"], order_number=row["Order_ID"],
                 customer=row["Customer_name"], delivery_location=row["Ship_to"],
                 data_source="document" if document_driven else "tracker",
-                rental_id=rental_id, parent_rental_number=rental.get('rental_number') or rental_number(extra), ticket_number=row['Order_ID'] if row['Order_ID'].startswith(('TK-', 'OD-')) else None,
-                rental_order=rental.get('rental_number') or rental_number(extra),
-                customer_order_number=extra.get('customer_order_number'),
+                parent_id=rental_id, parent_order_number=rental.get('rental_number') or extra.get('parent_order_number'),
                 billing_address=extra.get("address"), billing_address_source=("document" if document_driven else "synthetic_manifest") if extra.get("address") else None,
                 status=row["Status"], order_date=row["Today"], due_date=row["Deadline"],
                 assigned_to=row["Requested by"], order_type=row["Order_Type"],
@@ -250,12 +249,12 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 if ticket['candidate_summary'][str(number)]['possible'] == 0 and not ticket['processing']]
             if ticket['pages_needing_upload'] and len(ticket['pages_needing_upload']) == len(ticket['unaccounted_pages']) and ticket['unidentified_scan_pages']:
                 ticket['page_gap_status'] = 'no_compatible_image'
-        return sorted(tickets, key=lambda r: (r["shipment"] or "", r["work_order"]), reverse=True)
+        return sorted(tickets, key=lambda r: (r["parent_order_number"] or "", r["order_number"]), reverse=True)
 
     def find_ticket(store, ticket_id):
         row = next((r for r in all_tickets(store) if r["id"] == ticket_id), None)
         if not row:
-            raise HTTPException(404, "Work order not found")
+            raise HTTPException(404, "Order not found")
         return row
 
     def ticket_pages(store, ticket_id):
@@ -304,7 +303,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
             recent = store.rows(select(db.attempts.c.finished_at).where(db.attempts.c.status == "success")
                                 .order_by(db.attempts.c.finished_at.desc()).limit(1))
             return dict(tickets=len(tickets), pages=counts["document_pages"], documents=counts["documents"],
-                rental_orders=len(store.rows(select(db.rental_orders.c.id))),
+                parent_orders=len(store.rows(select(db.rental_orders.c.id))),
                 missing_tickets=sum(bool(t["missing_pages"]) and not t["processing"] for t in tickets),
                 flagged_tickets=sum(t["flagged"] for t in tickets),
                 verified_tickets=sum(t["ocr_status"] == "verified" for t in tickets),
@@ -324,7 +323,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
             if q:
                 query = q.casefold()
                 rows = [r for r in rows if any(query in str(r[k] or "").casefold()
-                        for k in ("work_order", "shipment", "customer", "delivery_location", "billing_address", "parent_rental_number"))]
+                        for k in ("order_number", "customer", "delivery_location", "billing_address", "parent_order_number"))]
             if status != "all":
                 rows = [r for r in rows if r["status"] == status.upper()]
             if ocr == "missing":
@@ -335,7 +334,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 rows = [r for r in rows if not r["reviewed"]]
             return {"tickets": rows, "total": len(rows)}
 
-    @app.get("/api/workspaces/{dataset}/rental-orders")
+    @app.get("/api/workspaces/{dataset}/parent-orders")
     def rental_order_list(dataset):
         with workspace(dataset) as store:
             tickets = all_tickets(store)
@@ -346,22 +345,22 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 .select_from(db.rental_orders.join(db.customers)))
             result = []
             for row in rows:
-                children = [t for t in tickets if t['rental_id'] == row['id']]
+                children = [t for t in tickets if t['parent_id'] == row['id']]
                 unassigned = [p['page_id'] for p in pages if p['rental_id'] == row['id'] and p['page_id'] not in actual]
-                result.append(dict(id=row['id'], rental_number=row['rental_number'], customer=row['customer'],
+                result.append(dict(id=row['id'], parent_number=row['rental_number'], order_type=parent_type(row['rental_number']), customer=row['customer'],
                     address=row['address'], tickets=children, ticket_count=len(children),
                     ready_tickets=sum(t['download_ready'] for t in children), unassigned_pages=len(unassigned)))
-            return {'rental_orders': result, 'total': len(result)}
+            return {'parent_orders': result, 'total': len(result)}
 
-    @app.get("/api/workspaces/{dataset}/rental-orders/{rental_id}/download.zip")
+    @app.get("/api/workspaces/{dataset}/parent-orders/{rental_id}/download.zip")
     def rental_download(dataset, rental_id):
         with workspace(dataset) as store:
             rental = store.rows(select(db.rental_orders).where(db.rental_orders.c.id == rental_id))
             if not rental:
-                raise HTTPException(404, 'Rental order not found')
-            ready = [row for row in all_tickets(store) if row['rental_id'] == rental_id and row['download_ready']]
+                raise HTTPException(404, 'Order not found')
+            ready = [row for row in all_tickets(store) if row['parent_id'] == rental_id and row['download_ready']]
         if not ready:
-            raise HTTPException(409, 'No complete tickets are ready for this rental order')
+            raise HTTPException(409, 'No complete work orders or shipments are ready for this order')
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
             for row in ready:
@@ -376,7 +375,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
     def ticket(dataset, ticket_id):
         with workspace(dataset) as store:
             row = find_ticket(store, ticket_id)
-            extra = {} if row['data_source'] == 'document' else enrichments().get((row["work_order"], row["shipment"]), {})
+            extra = {} if row['data_source'] == 'document' else enrichments().get(row["order_number"], {})
             extracted = page_field_records(store)
             selected, latest = ticket_pages(store, ticket_id)
             metadata = extra.get("pages", [])
@@ -391,9 +390,9 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                     paper=source.get("document_type", "Ticket page"), copy=source.get("copy"),
                     fields=source if row['data_source'] == 'document' else {},
                     comparison=compare_page(row, source, printed or index + 1) if row['data_source'] == 'document' else None,
-                    expected=row['parent_rental_number'] if attempt and str(attempt['identifier'] or '').startswith('RO-') else row["shipment"], extracted=attempt["identifier"] if attempt else None,
+                    expected=row['parent_order_number'] if attempt and str(attempt['identifier'] or '').startswith(('RO-', 'SO-')) else row["order_number"], extracted=attempt["identifier"] if attempt else None,
                     ocr_status=attempt["status"] if attempt else "pending",
-                    matched=bool(attempt and attempt["status"] == "success" and attempt["identifier"] in {row["shipment"], row["work_order"], row["parent_rental_number"]}),
+                    matched=bool(attempt and attempt["status"] == "success" and attempt["identifier"] in {row["order_number"], row["parent_order_number"]}),
                     manually_approved=manually_approved, accepted=manually_approved or bool(attempt and attempt['status'] == 'success'),
                     approved_at=page.get('approved_at'), approved_by=page.get('approved_by'),
                     processed_at=attempt["finished_at"] if attempt else None,
@@ -454,7 +453,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 if change.printed_page not in row['unaccounted_pages']:
                     raise HTTPException(409, 'This printed page is already accounted for or outside the expected page count')
                 if change.page_id not in {p['id'] for p in row['unidentified_scan_pages']}:
-                    raise HTTPException(409, 'Choose an unidentified page from this rental order or its original source scan')
+                    raise HTTPException(409, 'Choose an unidentified page from this order or its original source scan')
             candidates = store.rows(select(db.pages, db.documents.c.path, db.documents.c.sha256)
                 .select_from(db.pages.join(db.documents)).where(db.pages.c.id == change.page_id))
             if not candidates:
@@ -469,7 +468,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 if comparison['blocked']:
                     raise HTTPException(409, 'This image conflicts with the target: ' + ', '.join(comparison['conflicts']))
                 if comparison['needs_acknowledgment'] and not change.acknowledge_differences:
-                    raise HTTPException(409, 'Confirm the shipment difference or unreadable identity after inspecting this image')
+                    raise HTTPException(409, 'Confirm the unreadable identity after inspecting this image')
                 try:
                     with store.engine.begin() as connection:
                         # Recheck ownership inside the write transaction; constraints also protect page/slot uniqueness.
@@ -604,8 +603,8 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 approvals = store.rows(select(db.page_approvals).where(db.page_approvals.c.page_id.in_(page_ids)))
                 affected = {a['order_id'] for a in [*links, *approvals]}
                 fields = page_field_records(store)
-                observed_orders = {fields[p].get('work_order') for p in page_ids if p in fields}
-                rows = [t for t in all_tickets(store) if t['id'] in affected or t['work_order'] in observed_orders]
+                observed_orders = {fields[p].get('order_number') for p in page_ids if p in fields}
+                rows = [t for t in all_tickets(store) if t['id'] in affected or t['order_number'] in observed_orders]
                 latest = {}
                 for attempt in store.rows(select(db.attempts).where(db.attempts.c.page_id.in_(page_ids))
                     .order_by(db.attempts.c.started_at, db.attempts.c.id)):
@@ -614,7 +613,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 unresolved = sum(status in {'no_match', 'error'} and page not in approved for page, status in latest.items())
                 completed = sum(status in {'success', 'no_match', 'error'} for status in latest.values())
                 if restored:
-                    ready = [dict(id=t['id'], work_order=t['work_order'], shipment=t['shipment']) for t in rows
+                    ready = [dict(id=t['id'], order_number=t['order_number'], order_type=t['order_type']) for t in rows
                         if t['download_ready'] and (root / 'Scans/output' / f"ticket-{t['id']}.pdf").is_file()]
                     snapshot.update(file=Path(document['path']).name, document_id=document['id'], total=len(page_ids),
                         completed=completed, matched=sum(status == 'success' or page in approved for page, status in latest.items()),
@@ -665,7 +664,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                     # another ticket's pages into a valid-looking ZIP.
                     content = download(dataset, ticket['id'], preview=True).body
                     name = ticket_filename(row)
-                    archive.writestr(f"{row['parent_rental_number']}/{name}" if row.get('parent_rental_number') else name, content)
+                    archive.writestr(f"{row['parent_order_number']}/{name}" if row.get('parent_order_number') else name, content)
                     downloaded_rows.append(row)
             if progress.snapshot()['revision'] != revision:
                 raise HTTPException(409, "The scan has changed. Refresh before downloading")
@@ -713,7 +712,7 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                     modified = 0
                 rows.append(dict(id=attempt.get("id", page["id"]), page_id=page["id"],
                     identifier=attempt.get("identifier"), status="manually_approved" if approval else attempt.get("status", "pending"),
-                    original_ocr_status=attempt.get('status'), rental_id=parent_pages.get(page['id']), parent_rental_number=parents.get(parent_pages.get(page['id'])),
+                    original_ocr_status=attempt.get('status'), parent_id=parent_pages.get(page['id']), parent_order_number=parents.get(parent_pages.get(page['id'])),
                     page=page["page_number"], document_id=page["document_id"], document=Path(page["path"]).name,
                     at=attempt.get("finished_at") or attempt.get("started_at"),
                     error_code=attempt.get("error_code"), matched_order=order, modified=modified,

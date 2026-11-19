@@ -27,7 +27,7 @@ def test_watched_folder_ignores_outside_samples_then_reads_each_page_once(tmp_pa
                 assert worker.progress.snapshot()['total'] == 6
                 assert worker.progress.snapshot()['completed'] == len(calls)
             calls.append(1)
-            return manifest['tickets'][0]['shipment']
+            return manifest['tickets'][0]['order_id']
         worker = IntakeWatcher(store, folder, {checksum(pdf)}, extract)
         worker.tick()
         assert store.counts()['documents'] == 0
@@ -41,6 +41,9 @@ def test_watched_folder_ignores_outside_samples_then_reads_each_page_once(tmp_pa
         assert len(calls) == 6
         assert worker.progress.snapshot()['phase'] == 'ready'
         assert worker.progress.snapshot()['matched'] == worker.progress.snapshot()['total'] == 6
+        order = store.rows(select(db.orders))[0]
+        assert worker.progress.snapshot()['ready_tickets'] == [dict(id=order['id'], order_number='W-0000001', order_type='RENTAL')]
+        assert {a['identifier'] for a in store.rows(select(db.attempts))} == {'W-0000001'}
         output = next((folder.parent / 'output').glob('*.pdf'))
         with fitz.open(output) as result:
             assert len(result) == 6
@@ -84,7 +87,7 @@ def test_progress_cannot_announce_ready_for_unmatched_pages_or_failed_pdf(tmp_pa
         store.migrate()
         ingest_tracker(store, outside / 'orders.xlsx', 'demo', synthetic=True)
         def extractor(*args, **kwargs):
-            return None if failure == 'no_match' else manifest['tickets'][0]['shipment']
+            return None if failure == 'no_match' else manifest['tickets'][0]['order_id']
         if failure == 'pdf_error':
             def fail_pdf(*args):
                 raise OSError('simulated PDF write failure')
@@ -163,7 +166,7 @@ def test_transient_page_error_is_retried_on_resubmission_and_page_limit_stops_a_
             calls.append(1)
             if len(calls) == 3:
                 raise ConnectionError('transient')
-            return manifest['tickets'][0]['shipment']
+            return manifest['tickets'][0]['order_id']
         worker = IntakeWatcher(store, folder, {checksum(pdf)}, extract)
         shutil.copy2(pdf, folder / 'scan.pdf')
         monkeypatch.setenv('OCR_MAX_PAGES_PER_FILE', '4')

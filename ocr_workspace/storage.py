@@ -57,8 +57,9 @@ customers = Table("customers", metadata, identity(),
     UniqueConstraint("source_system", "external_key"), schema="core")
 orders = Table("orders", metadata, identity(),
     Column("source_system", String(80), nullable=False),
+    # The document itself: W-… (work order of a rental order) or "Shipment 00001"
+    # (shipment of a sales order). Its parent RO-/SO- is linked through rental_tickets.
     Column("order_number", String(80), nullable=False),
-    Column("shipment_number", String(80), nullable=False),
     Column("customer_id", ForeignKey("core.customers.id"), nullable=False),
     Column("ship_to", Text, nullable=False), Column("status", String(20), nullable=False),
     Column("order_date", Date), Column("deadline", Date),
@@ -176,7 +177,7 @@ class Store:
                             connection.execute(CreateSchema(schema, if_not_exists=True))
                     versions.create(connection, checkfirst=True)
                     current = connection.scalar(select(func.max(versions.c.version))) or 0
-                    if current > 6:
+                    if current > 7:
                         raise ValueError("Database schema is newer than this application")
                     if current == 0:
                         metadata.create_all(connection)
@@ -219,6 +220,15 @@ class Store:
                     if current < 6:
                         ocr_cache.create(connection, checkfirst=True)
                         connection.execute(versions.insert().values(version=6, applied_at=utcnow()))
+                    if current < 7:
+                        # Each work order or shipment is keyed by its own number; the separate
+                        # shipment number no longer exists.
+                        from sqlalchemy import inspect
+                        existing = inspect(connection).get_columns('orders', schema=None if sqlite else 'core')
+                        if any(column['name'] == 'shipment_number' for column in existing):
+                            table = 'orders' if sqlite else 'core.orders'
+                            connection.exec_driver_sql(f'ALTER TABLE {table} DROP COLUMN shipment_number')
+                        connection.execute(versions.insert().values(version=7, applied_at=utcnow()))
                     if sqlite and connection.exec_driver_sql('PRAGMA foreign_key_check').all():
                         raise ValueError('Migration would break existing document references')
             finally:
@@ -237,13 +247,13 @@ class Store:
 
     def order_rows(self):
         statement = select(orders.c.id.label("database_id"),
-            orders.c.order_number.label("Order_ID"), orders.c.shipment_number.label("SO"),
+            orders.c.order_number.label("Order_ID"),
             customers.c.name.label("Customer_name"), orders.c.ship_to.label("Ship_to"),
             orders.c.status.label("Status"), orders.c.order_date.label("Today"),
             orders.c.deadline.label("Deadline"), orders.c.requested_by.label("Requested by"),
             orders.c.order_type.label("Order_Type"), orders.c.source_sheet.label("Source_Sheet"),
             orders.c.expected_pages.label("Expected_Pages"))
-        return self.rows(statement.select_from(orders.join(customers)).order_by(orders.c.shipment_number))
+        return self.rows(statement.select_from(orders.join(customers)).order_by(orders.c.order_number))
 
     def reconciliation_rows(self):
         statement = select(orders.c.id.label("database_id"),

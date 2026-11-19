@@ -1006,14 +1006,14 @@ a[aria-disabled="true"] {
 .order-result-group[open] > .order-result-summary > .icon {
   transform: rotate(90deg);
 }
-.rental-order-group > .order-result-summary {
+.parent-order-group > .order-result-summary {
   background: #eff6f3;
 }
-.rental-child-groups {
+.parent-child-groups {
   border-left: 3px solid #bcd7cb;
   margin-left: 20px;
 }
-.rental-actions {
+.parent-actions {
   padding: 16px 24px;
 }
 .order-result-content {

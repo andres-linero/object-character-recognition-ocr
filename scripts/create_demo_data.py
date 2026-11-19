@@ -25,14 +25,18 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 GENERATOR_ID = "ocr-synthetic-demo-v1"
 ROOT = Path(__file__).resolve().parents[1]
-DOCUMENT_TYPES = ("Delivery Ticket", "Rental Agreement", "Delivery Acknowledgement")
+# Rental orders (RO-) and sales orders (SO-) share one count. A rental order
+# creates work orders (W-); a sales order creates shipments ("Shipment 00001").
+RENTAL_DOCUMENT_TYPES = ("Delivery Ticket", "Rental Agreement", "Delivery Acknowledgement")
+SALES_DOCUMENT_TYPES = ("Delivery Ticket", "Sales Order", "Delivery Acknowledgement")
+DOCUMENT_TYPES = RENTAL_DOCUMENT_TYPES
 COPY_NAMES = ("White", "Yellow", "Blue", "Pink")
 COPY_COLORS = ((1, 1, 1), (1, 0.98, 0.80), (0.88, 0.95, 1), (1, 0.91, 0.94))
 PAGE_WIDTH, PAGE_HEIGHT = 612, 792
 TRACKER_COLUMNS = (
-    "Order_ID", "SO", "Customer_name", "Ship_to", "Status", "Today",
+    "Order", "Work order", "Customer_name", "Ship_to", "Status", "Today",
     "Deadline", "Deadline Status", "Requested by", "Expected_Pages", "Order_Type",
-    "Rental_Order", "Address",
+    "Address",
 )
 INK = (0.12, 0.17, 0.24)
 MUTED = (0.35, 0.39, 0.45)
@@ -54,8 +58,7 @@ class Item:
 
 @dataclass(frozen=True)
 class Ticket:
-    order_id: str
-    shipment: str
+    order_id: str  # the document itself: "W-0000001" (rental) or "Shipment 00001" (sale)
     customer: str
     destination: str
     address: str
@@ -67,18 +70,22 @@ class Ticket:
     status: str
     page_count: int
     items: tuple[Item, ...]
-    parent_rental_number: str | None = None
+    parent_order_number: str | None = None  # RO-… for a work order, SO-… for a shipment
 
     @property
-    def rental_order(self) -> str:
-        return self.parent_rental_number or f"RA-{int(self.order_id.split('-')[-1]) - 290000}"
+    def order_type(self) -> str:
+        return "SALE" if self.order_id.startswith("Shipment") else "RENTAL"
+
+    @property
+    def document_types(self) -> tuple[str, ...]:
+        return SALES_DOCUMENT_TYPES if self.order_type == "SALE" else RENTAL_DOCUMENT_TYPES
 
     def tracker_row(self) -> dict:
         return dict(zip(TRACKER_COLUMNS, (
-            self.order_id, self.shipment, self.customer, self.destination,
+            self.parent_order_number or "", self.order_id, self.customer, self.destination,
             self.status, self.order_date, self.deadline,
             "Complete" if self.status == "COMPLETE" else "On schedule",
-            self.dispatcher, self.page_count, "RENTAL", self.rental_order, self.address,
+            self.dispatcher, self.page_count, self.order_type, self.address,
         )))
 
 
@@ -96,7 +103,12 @@ def validate_options(count: int, min_pages: int, max_pages: int) -> tuple[int, .
 def build_tickets(count: int = 100, seed: int = 42, min_pages: int = 6,
                   max_pages: int = 12, start_date: date = date(2030, 4, 1),
                   start_index: int = 1) -> list[Ticket]:
-    """Create deterministic fictional records; dates do not depend on today's date."""
+    """Create deterministic fictional records; dates do not depend on today's date.
+
+    Records come in groups of four: three work orders (W-) under one rental
+    order (RO-), then one shipment under a sales order (SO-). The RO and SO
+    numbers come from one shared count; work orders and shipments each have their own.
+    """
     choices = validate_options(count, min_pages, max_pages)
     if not 1 <= start_index <= 1_000_000 or start_index + count - 1 > 1_000_000:
         raise ValueError("ticket index range must be between 1 and 1000000")
@@ -108,14 +120,19 @@ def build_tickets(count: int = 100, seed: int = 42, min_pages: int = 6,
     for position in range(count):
         i = start_index + position - 1
         when = start_date + timedelta(days=position % 45)
-        customer = f"Demo {adjectives[(i // 10) % 10]} {nouns[i % 10]}"
+        # One customer and billing address per group of four, so every work
+        # order under a rental order belongs to the same customer.
+        group = i // 4
+        customer = f"Demo {adjectives[(group // 10) % 10]} {nouns[group % 10]}"
         items = tuple(Item(f"DEMO-{i + 1:04d}-{j + 1:02d}", description,
                            rng.randint(2, 30), str(Decimal(rng.randint(250, 2400)) / 100))
                       for j, description in enumerate(rng.sample(equipment, rng.randint(3, 6))))
+        sale = i % 4 == 3
         tickets.append(Ticket(
-            order_id=f"W-{990001 + i}", shipment=str(900001 + i), customer=customer,
+            order_id=f"Shipment {group + 1:05d}" if sale else f"W-{i - group + 1:07d}",
+            parent_order_number=f"SO-{2 * group + 2:07d}" if sale else f"RO-{2 * group + 1:07d}", customer=customer,
             destination=f"Demo Depot {i % 12 + 1:02d}",
-            address=f"{100 + i} Simulation Way, Demo City, ZZ 00000",
+            address=f"{100 + group} Simulation Way, Demo City, ZZ 00000",
             contact_email=f"dispatch.{i + 1:03d}@example.test",
             contact_phone=f"202-555-{100 + i % 100:04d}",
             dispatcher=f"Dispatch Desk {i % 5 + 1:02d}", order_date=when,
@@ -144,40 +161,29 @@ def _draw_page(page, ticket: Ticket, kind: str, copy_number: int, copy_count: in
                page_number: int, order_offset: float = 0):
     page.draw_rect(page.rect, fill=COPY_COLORS[copy_number - 1], color=None)
     # Only identifiers and document labels occupy the application's OCR crop.
-    _text(page, 36, 39, "NORTHSTAR EQUIPMENT" if ticket.parent_rental_number else "NORTHSTAR DEMO EQUIPMENT", 15, True, BLUE)
-    _text(page, 36, 58, "Fictional rental and delivery operations", 9, color=MUTED)
-    page.draw_rect(fitz.Rect(322, 24, 576, 166), fill=PALE, color=None)
-    if ticket.order_id.startswith('OD-'):
-        # Keep all personal and commercial detail below the fixed Azure crop.
-        # A shifted order line remains readable in the original full-page image.
-        page.draw_rect(fitz.Rect(322, 24, 576, 196), fill=PALE, color=None)
-        _text(page, 334, 45, "RENTAL / DELIVERY RECORD", 9, True, BLUE)
-        _text(page, 334, 69, kind, 9, True)
-        _text(page, 334, 86, f"{COPY_NAMES[copy_number - 1]} copy | Page {page_number}/{ticket.page_count}", 9)
-        _text(page, 334, 126, f"Rental No. {ticket.parent_rental_number}", 13, True, BLUE)
-        _text(page, 334, 154 + order_offset, f"Order No. {ticket.order_id}", 13, True)
-        _text(page, 334, 182, f"Shipment No. SO-{ticket.shipment}", 12)
-    elif ticket.parent_rental_number:
-        _text(page, 334, 47, f"Rental Order No. {ticket.parent_rental_number}", 15, True, BLUE)
-        _text(page, 334, 70, f"Work Order / Ticket No. {ticket.order_id}", 11, True)
-        _text(page, 334, 91, f"Shipment No. {ticket.shipment}", 10)
+    _text(page, 36, 39, "NORTHSTAR EQUIPMENT", 15, True, BLUE)
+    _text(page, 36, 58, "Fictional rental and sales operations", 9, color=MUTED)
+    # Keep all personal and commercial detail below the fixed Azure crop.
+    # A shifted order line remains readable in the original full-page image.
+    page.draw_rect(fitz.Rect(322, 24, 576, 196), fill=PALE, color=None)
+    sale = ticket.order_type == "SALE"
+    _text(page, 334, 45, "SALES ORDER" if sale else "RENTAL ORDER", 9, True, BLUE)
+    _text(page, 334, 69, kind, 9, True)
+    _text(page, 334, 86, f"{COPY_NAMES[copy_number - 1]} copy | Page {page_number}/{ticket.page_count}", 9)
+    if sale:
+        _text(page, 334, 126, f"Sales Order No. {ticket.parent_order_number}", 13, True, BLUE)
+        _text(page, 334, 154 + order_offset, f"Shipment No. {ticket.order_id.split()[-1]}", 13, True)
     else:
-        _text(page, 334, 47, "Delivery Ticket / Shipment", 11, True)
-        _text(page, 334, 70, f"Shipment No. {ticket.shipment}", 16, True, BLUE)
-        _text(page, 334, 91, f"Work Order No. {ticket.order_id}", 10)
-    if not ticket.parent_rental_number:
-        _text(page, 334, 111, f"Rental Agreement No. {ticket.rental_order}", 10, True)
-    if not ticket.order_id.startswith('OD-'):
-        _text(page, 334, 122, kind, 8, True)
-        _text(page, 334, 131, f"{COPY_NAMES[copy_number - 1]} copy {copy_number}/{copy_count} | Page {page_number}/{ticket.page_count}", 9)
-        _text(page, 334, 150, "SYNTHETIC DEMO - NOT A REAL ORDER", 8, True, MUTED)
-    page.draw_line((36, 185), (306 if ticket.order_id.startswith('OD-') else 576, 185), color=BLUE, width=1.2)
+        _text(page, 334, 126, f"Rental Order No. {ticket.parent_order_number}", 13, True, BLUE)
+        _text(page, 334, 154 + order_offset, f"Work Order No. {ticket.order_id}", 13, True)
+    _text(page, 334, 182, "SYNTHETIC DEMO - NOT A REAL ORDER", 7, True, MUTED)
+    page.draw_line((36, 185), (306, 185), color=BLUE, width=1.2)
     _text(page, 36, 212, kind.upper(), 18, True, BLUE)
     _text(page, 36, 232, f"{COPY_NAMES[copy_number - 1]} copy - fictional training packet", 9, color=MUTED)
     _box(page, (36, 249, 300, 351), "CUSTOMER / BILL TO", [ticket.customer,
          ticket.address, ticket.contact_email, ticket.contact_phone])
     _box(page, (312, 249, 576, 351), "SHIP TO / DISPATCH", [ticket.destination,
-         f"Demo loading bay {int(ticket.shipment) % 12 + 1:02d}", f"Order date: {ticket.order_date.isoformat()}",
+         f"Demo loading bay {int(ticket.parent_order_number.split('-')[-1]) % 12 + 1:02d}", f"Order date: {ticket.order_date.isoformat()}",
          f"Due date: {ticket.deadline.isoformat()}"])
     _text(page, 36, 371, f"Transport: Demo Fleet | Dispatch: {ticket.dispatcher} | Mode: simulated delivery", 9, color=MUTED)
     if kind == "Delivery Ticket":
@@ -198,7 +204,7 @@ def _draw_page(page, ticket: Ticket, kind: str, copy_number: int, copy_count: in
         _box(page, (36, 635, 576, 696), "DELIVERY NOTES", [
             "Quantities staged for the fictional depot; no actual equipment movement.",
             "All item codes, rates and quantities were generated for training."])
-    elif kind == "Rental Agreement":
+    elif kind in ("Rental Agreement", "Sales Order"):
         _text(page, 36, 406, "DEMO TERMS - NOT A CONTRACT OR LEGAL FORM", 11, True, BLUE)
         paragraphs = (
             ("Purpose", "This page is an original fictional training document for an OCR demonstration."),
@@ -206,7 +212,7 @@ def _draw_page(page, ticket: Ticket, kind: str, copy_number: int, copy_count: in
             ("Schedule", "Dates describe an invented workflow and create no delivery or return obligation."),
             ("Charges", "Displayed rates and amounts are sample numbers. No payment is due."),
             ("Condition", "Equipment condition and handling checks are simulated, not actual inspections."),
-            ("Acceptance", "No agreement is created. All copies belong to the same synthetic shipment."),
+            ("Acceptance", "No agreement is created. All copies belong to the same synthetic order."),
         )
         for i, (title, text) in enumerate(paragraphs):
             y = 438 + i * 38
@@ -216,7 +222,7 @@ def _draw_page(page, ticket: Ticket, kind: str, copy_number: int, copy_count: in
     else:
         _text(page, 36, 406, "RECEIVING CHECK - SIMULATED EVIDENCE ONLY", 11, True, BLUE)
         for i, text in enumerate((
-            "[X] Ticket number and shipment identifier match the packet.",
+            "[X] Order number matches the packet.",
             "[X] Listed quantities checked by Demo Receiving Desk.",
             "[X] Packaging condition recorded as demo acceptable.",
             "[X] No missing items reported in this fictional scenario.",
@@ -226,13 +232,10 @@ def _draw_page(page, ticket: Ticket, kind: str, copy_number: int, copy_count: in
             "Receiving: Demo Receiving Desk | Transport: Demo Fleet Desk",
             "NOT SIGNED - DEMO. No handwritten or personal signature is included."])
         _box(page, (36, 655, 576, 710), "DELIVERY RESULT", ["SIMULATED ACCEPTANCE ONLY - NOT PROOF OF DELIVERY"])
-    if ticket.order_id.startswith('OD-'):
-        page.draw_line((36, 725), (305, 725), color=MUTED, width=.6)
-        page.draw_line((405, 725), (576, 725), color=MUTED, width=.6)
-        _text(page, 36, 738, "Received by / signature: NOT SIGNED", 8, color=MUTED)
-        _text(page, 405, 738, "Date: not signed", 8, color=MUTED)
-    else:
-        _text(page, 36, 720, "Acknowledgment: DEMO ONLY - no handwriting, signature, or personal identity.", 9)
+    page.draw_line((36, 725), (305, 725), color=MUTED, width=.6)
+    page.draw_line((405, 725), (576, 725), color=MUTED, width=.6)
+    _text(page, 36, 738, "Received by / signature: NOT SIGNED", 8, color=MUTED)
+    _text(page, 405, 738, "Date: not signed", 8, color=MUTED)
     page.draw_line((36, 742), (576, 742), color=(0.72, 0.77, 0.82), width=0.6)
     _text(page, 36, 760, "SYNTHETIC DEMO DATA | All entities and transactions are fictional", 8, color=MUTED)
     _text(page, 496, 760, f"Page {page_number}/{ticket.page_count}", 8, color=MUTED)
@@ -244,7 +247,7 @@ def write_ticket_pdf(path: Path, ticket: Ticket, rasterize: bool = True,
     copy_count = ticket.page_count // 3
     with fitz.open() as pdf:
         for index in range(ticket.page_count):
-            kind = DOCUMENT_TYPES[index // copy_count]
+            kind = ticket.document_types[index // copy_count]
             copy_number = index % copy_count + 1
             with fitz.open() as source:
                 page = source.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
@@ -258,8 +261,8 @@ def write_ticket_pdf(path: Path, ticket: Ticket, rasterize: bool = True,
                     pdf.insert_pdf(source)
             pages.append({"page": index + 1, "document_type": kind,
                           "copy": COPY_NAMES[copy_number - 1], "copy_number": copy_number,
-                          "expected_ocr_id": ticket.shipment})
-        pdf.set_metadata({"title": f"Synthetic demo shipment {ticket.shipment}",
+                          "expected_ocr_id": ticket.order_id})
+        pdf.set_metadata({"title": f"Synthetic demo order {ticket.order_id}",
                           "author": "OCR Demo Generator", "subject": "Entirely fictional demo data",
                           "creator": GENERATOR_ID})
         pdf.save(path, garbage=4, deflate=True, no_new_id=True)
@@ -342,19 +345,19 @@ def generate_dataset(output: Path, count: int = 100, seed: int = 42,
         incoming.mkdir()
         manifest_tickets = []
         for ticket in tickets:
-            pdf_name = f"demo_ticket_{ticket.shipment}.pdf"
+            pdf_name = f"demo_order_{ticket.order_id.replace(' ', '_')}.pdf"
             pages = write_ticket_pdf(incoming / pdf_name, ticket, rasterize)
             record = asdict(ticket)
             record["items"] = list(record["items"])
             record["order_date"] = ticket.order_date.isoformat()
             record["deadline"] = ticket.deadline.isoformat()
-            record.update({"rental_order": ticket.rental_order, "pdf": f"incoming_scans/{pdf_name}", "pages": pages,
+            record.update({"order_type": ticket.order_type, "pdf": f"incoming_scans/{pdf_name}", "pages": pages,
                            "pdf_sha256": hashlib.sha256((incoming / pdf_name).read_bytes()).hexdigest()})
             manifest_tickets.append(record)
         _write_tracker(staging / "orders.xlsx", tickets)
         manifest = {"generator": GENERATOR_ID, "seed": seed, "count": count,
                     "start_date": start_date.isoformat(), "start_index": start_index, "min_pages": min_pages,
-                    "max_pages": max_pages, "document_types": list(DOCUMENT_TYPES),
+                    "max_pages": max_pages, "document_types": sorted({*RENTAL_DOCUMENT_TYPES, *SALES_DOCUMENT_TYPES}),
                     "page_count_rule": "Two to four colored copies of each of three papers by default; total pages are multiples of three.",
                     "rasterized": rasterize, "render_dpi": 120 if rasterize else None,
                     "total_pages": sum(t.page_count for t in tickets), "synthetic": True,

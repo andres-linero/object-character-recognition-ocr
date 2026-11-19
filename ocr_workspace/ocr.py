@@ -1,7 +1,7 @@
 """
 Shared OCR utility — Azure AI Document Intelligence (prebuilt-read).
 Only the top-right corner of each image is sent to Azure (privacy crop).
-The crop is intended to capture order/shipment number fields.
+The crop is intended to capture the order number fields (RO, SO, W, Shipment).
 Verify the crop against your document layout before using private documents.
 """
 import json
@@ -14,8 +14,6 @@ from typing import Literal
 from typing import Optional
 
 from PIL import Image
-
-from .page_review import canonical_rental_number
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +37,10 @@ def _get_azure_ocr_types():
     return DocumentIntelligenceClient, AnalyzeDocumentRequest, AzureKeyCredential
 
 # PRIVACY BOUNDARY — DO NOT WIDEN.
-# Crop to top-right corner: captures only the Work Order No. / Shipment No.
-# field that needs to reach Azure Document Intelligence. Customer names,
+# Crop to top-right corner: captures only the order number fields (RO, SO, W, Shipment)
+# that need to reach Azure Document Intelligence. Customer names,
 # addresses, signatures, pricing, and line items stay on-premise.
-# If OCR misreads shipments, fix it in the text/regex logic below — never
+# If OCR misreads identifiers, fix it in the text/regex logic below — never
 # by enlarging this window.
 HEADER_CROP_HEIGHT = 0.25   # top 25% of page
 HEADER_CROP_WIDTH = 0.50    # right 50% of page
@@ -65,14 +63,14 @@ def _crop_header(image_bytes: bytes, height_ratio: float = HEADER_CROP_HEIGHT, w
 
 @dataclass(frozen=True)
 class ParsedIdentifier:
-    kind: Literal["shipment", "work_order", "rental_order", "customer_order"]
+    kind: Literal["work_order", "shipment", "rental_order", "sales_order"]
     value: str
     identifiers: dict = field(default_factory=dict, compare=False)
 
 
 # Bump whenever identifier parsing changes: cached provider results parsed by
 # an older version are ignored, so a regex fix is never hidden by the cache.
-PARSER_VERSION = 1
+PARSER_VERSION = 3
 
 # Bounded provider retries. azure-core retries 408/429/5xx and transport
 # failures with exponential backoff and honours Retry-After; the explicit
@@ -121,7 +119,7 @@ def extract_order_identity(
 ) -> Optional[ParsedIdentifier]:
     """
     Send image to Azure Document Intelligence (prebuilt-read) and extract
-    the work order ID or SO number via regex.
+    the RO, SO, W or Shipment number via regex.
     When crop_header=True (default), only the top portion of the image is sent.
     Use crop_ratio to control how much (0.25 default for both PDFs and phone photos).
     Returns the matched string or None.
@@ -154,143 +152,61 @@ def extract_order_identity(
     return parsed
 
 
+# The only identifiers in the system.
+#   RO-0000002      rental order   \  parent orders; both draw their number
+#   SO-0000001      sales order    /  from one shared count
+#   W-0000001       work order, created from a rental order (three pages)
+#   Shipment 00001  shipment, created from a sales order (one page)
+# A page prints its parent and its own document: RO + W, or SO + Shipment.
+_IDENTIFIER_PATTERNS = {
+    "rental_order": r"\b(RO)-(\d{4,12})\b",
+    "sales_order": r"\b(SO)-(\d{4,12})\b",
+    "work_order": r"\b(W)-(\d{4,12})\b",
+    "shipment": r"\b(Shipment)\s*(?:No\.?|Number|Nbr|#)?\s*[.:#]?\s*(\d{3,12})(?!\d)",
+}
+PARENT_OF = {"work_order": "rental_order", "shipment": "sales_order"}
+
+
+def canonical_identifier(kind: str, digits: str) -> str:
+    """Printed digits are kept as printed, including leading zeros."""
+    if kind == "shipment":
+        return f"Shipment {digits}"
+    return {"rental_order": "RO", "sales_order": "SO", "work_order": "W"}[kind] + f"-{digits}"
+
+
 def parse_document_identifiers(raw_text: str) -> dict:
-    """Read all labeled namespaces from one provider response, never conflating SO and order."""
-    text = re.sub(r'\s+', ' ', raw_text).strip()
-    patterns = {
-        'rental_order': r'\b(?:Rental\s*(?:Order|Agreement)?|Order)\s*(?:No\.?|Number|#)\s*[:#]?\s*((?:RO|RA)-\d+)\b',
-        'work_order': r'\b(?:(?:Work\s*Order|(?:Delivery\s*)?Ticket)\s*(?:No\.?|Number|#)?\s*[:#]?\s*((?:W-|TK-|OD-)?\d{4,12})|Order\s*(?:No\.?|Number|#)\s*[:#]?\s*(OD-\d{4,12}))\b',
-        'shipment': r'\b(?:Shipment\s*(?:No\.?|Number|#|Nbr)|Ship\s*(?:No\.?|Number|#)|Sale\s*(?:No\.?|Number|#)|SO\s*[:#]?|S/O)\s*[.:#]?\s*(?:SO-)?(\d{4,8})(?!\d)',
-        'customer_order': r'(?<!Work )(?<!Rental )\b(?:Customer\s+|Purchase\s+)?Order\s*(?:No\.?|Number|#)\s*[:#]?\s*((?:CO-|PO-)?\d{4,12})\b',
-    }
-    values = {}
-    for kind, pattern in patterns.items():
-        match = re.search(pattern, text, re.I)
-        if match:
-            value = next(group for group in match.groups() if group is not None).upper()
-            if kind == 'rental_order':
-                value = canonical_rental_number(value)
-            values[kind] = (value.lstrip('0') or '0') if value.isdigit() else value
-    return values
-
-
-def parse_identifier(raw_text: str) -> Optional[ParsedIdentifier]:
-    primary = _parse_primary_identifier(raw_text)
-    return ParsedIdentifier(primary.kind, primary.value, parse_document_identifiers(raw_text)) if primary else None
-
-
-def _parse_primary_identifier(raw_text: str) -> Optional[ParsedIdentifier]:
-    """Parse provider text without cloud calls, retaining its identifier namespace."""
-    # Aggressive normalization: collapse ALL whitespace (newlines, tabs,
-    # double spaces) into single spaces. Azure often splits "Shipment" and
-    # "No." across lines and the naive space-join leaves inconsistent gaps.
-    all_text = re.sub(r"\s+", " ", raw_text).strip()
-    logger.debug("OCR returned %d characters", len(all_text))
-
+    """Read every RO, SO, W and Shipment number in one provider response, each in its own namespace."""
+    text = re.sub(r"\s+", " ", raw_text).strip()
     # Optional exact header strings, separated by |; configure for your own forms.
     for noise in os.getenv("OCR_HEADER_NOISE", "").split("|"):
         if noise.strip():
-            all_text = all_text.replace(noise.strip(), "")
+            text = text.replace(noise.strip(), "")
+    values = {}
+    for kind, pattern in _IDENTIFIER_PATTERNS.items():
+        match = re.search(pattern, text, re.I)
+        if match:
+            values[kind] = canonical_identifier(kind, match.group(2))
+    return values
 
-    # Validate this looks like a ticket. Keywords are checked as single tokens
-    # (not multi-word phrases) so Azure line-splitting doesn't break the match.
-    text_lower = all_text.lower()
-    ticket_keywords = [
-        "delivery ticket", "elivery ticket",
-        "shipment confirmation", "shipment",
-        "sale no", "shipment no", "order no",
-        "work order",
-        "ticket no", "customer order", "rental order",
-    ]
-    is_ticket = any(kw in text_lower for kw in ticket_keywords)
 
-    if not is_ticket:
-        logger.warning("OCR: page rejected — no ticket keyword found")
-        return None
+def mixed_families(identifiers: dict) -> bool:
+    """True when a page prints rental numbers (RO, W) together with sales numbers (SO, Shipment)."""
+    rental = identifiers.get("rental_order") or identifiers.get("work_order")
+    sale = identifiers.get("sales_order") or identifiers.get("shipment")
+    return bool(rental and sale)
 
-    # OD is the order namespace; RO and SO are separate grouping references.
-    order = parse_document_identifiers(all_text).get('work_order')
-    if order and order.startswith('OD-'):
-        return ParsedIdentifier('work_order', order)
 
-    # Build a broad label-alternatives group so variants like "Shipment No",
-    # "Shipment Number", "Shipment #", "Sale No.", "Ship No", "SO#", "SO:"
-    # all match. The trailing \s*[.:#]?\s* absorbs any punctuation/spacing
-    # between label and number.
-    LABEL_ALTS = (
-        r"Shipment\s*(?:No|Number|#|Nbr)\s*\.?"   # Shipment No / Number / #
-        r"|Ship\s*(?:No|Number|#|Nbr)\s*\.?"      # Ship No / # (abbreviated)
-        r"|Sale\s*(?:No|Number|#|Nbr)\s*\.?"      # Sale No / Number / #
-        r"|SO\s*[#:]?"                             # SO#  /  SO:
-        r"|S/O\s*[#:]?"                            # S/O legacy format
-    )
+def parse_identifier(raw_text: str) -> Optional[ParsedIdentifier]:
+    """Parse provider text without cloud calls.
 
-    # A rental order is the parent of multiple tickets/work orders and shipments.
-    rental = re.search(r'\b(?:Rental\s*(?:Order|Agreement)?|Order)\s*(?:No\.?|Number|#)\s*[:#]?\s*((?:RO|RA)-\d+)\b', all_text, re.I)
-    if rental:
-        return ParsedIdentifier('rental_order', canonical_rental_number(rental.group(1)))
-
-    # 1. Shipment/Sale number from labeled fields (highest priority for SO documents)
-    #    Must check BEFORE W- pattern since shipment docs may have unrelated W- refs.
-    #    \d{4,8} — real shipment numbers are at least 4 digits. The old
-    #    \d{3,8} let 3-digit page fragments like "837" win over the
-    #    actual 5-digit shipment number on the same page.
-    label_match = re.search(
-        rf"\b(?:{LABEL_ALTS})\s*[.:#]?\s*(?:SO-)?0*(\d{{4,8}})(?!\d)",
-        all_text, re.IGNORECASE
-    )
-    if label_match:
-        return ParsedIdentifier("shipment", label_match.group(1))
-
-    # 2. Work Order ID pattern: W-XXXXXX
-    match = re.search(r'\b(?:W|TK)-\d+\b', all_text, re.IGNORECASE)
-    if match:
-        return ParsedIdentifier("work_order", match.group(0).upper())
-
-    # 3. Order No. as fallback (separate from shipment to avoid false matches)
-    order_match = re.search(
-        r'Work\s*Order\s*(?:No|Number|#)\s*\.?\s*[.:#]?\s*0*(\d{4,8})(?!\d)',
-        all_text, re.IGNORECASE
-    )
-    if order_match:
-        return ParsedIdentifier("work_order", order_match.group(1))
-    customer_order = parse_document_identifiers(all_text).get('customer_order')
-    if customer_order:
-        return ParsedIdentifier('customer_order', customer_order)
-
-    # 4. Shipment Confirmation with number before or after title
-    #    OCR sometimes reads the number out of order (e.g. "Confirmation 003452 Shipment No")
-    confirm_match = re.search(
-        r'(?:Shipment|hipment|Sale)\s*Confirmation\s+0*(\d{4,8})',
-        all_text, re.IGNORECASE
-    )
-    if confirm_match:
-        return ParsedIdentifier("shipment", confirm_match.group(1))
-
-    # 5. Last-resort fallback for shipment documents where Azure couldn't
-    #    pair the label with the number. Only triggers if the doc clearly
-    #    says "SHIPMENT" — we take the FIRST standalone 4-7 digit number
-    #    that is not a configured excluded number or a
-    #    4-digit year (2020-2099). The year filter fixed a real bug where
-    #    "2026" on a printed date label was being returned as the order ID.
-    #    Lookbehind/ahead also exclude LETTERS so customer codes like
-    #    "C000837" don't have their digit tail captured as a shipment.
-    #    Leading zeros are preserved then stripped like the labeled path.
-    allow_unlabeled = os.getenv("OCR_ALLOW_UNLABELED_FALLBACK", "").lower() in {"1", "true", "yes"}
-    if allow_unlabeled and ("shipment" in text_lower or "sale no" in text_lower):
-        for match in re.finditer(r'(?<![A-Za-z0-9])0*(\d{4,7})(?![A-Za-z0-9])', all_text):
-            candidate = match.group(1)
-            # Exclude form-specific postal codes or telephone fragments.
-            excluded = os.getenv("OCR_EXCLUDED_NUMBERS", "").split(",")
-            if candidate in {value.strip() for value in excluded}:
-                continue
-            # Skip 4-digit year-like numbers — printed dates on the form
-            # leak through this fallback otherwise.
-            if len(candidate) == 4 and 2020 <= int(candidate) <= 2099:
-                continue
-            return ParsedIdentifier("shipment", candidate)
-
+    The primary identifier is the page's own document: its work order or its
+    shipment. A page showing only its parent order still reports that parent.
+    """
+    identifiers = parse_document_identifiers(raw_text)
+    for kind in ("work_order", "shipment", "rental_order", "sales_order"):
+        if kind in identifiers:
+            return ParsedIdentifier(kind, identifiers[kind], identifiers)
     # Do not retain OCR content in application logs. Header crops can contain
     # order metadata even though full tickets are never sent to OCR.
-    logger.warning("OCR: ticket detected but no order number extracted")
+    logger.warning("OCR: no RO, SO, W or Shipment number found in the header")
     return None

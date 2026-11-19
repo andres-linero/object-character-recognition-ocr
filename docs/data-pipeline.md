@@ -36,16 +36,34 @@ The database role must be allowed to create the `staging`, `core`, and `ops` sch
 | Schema | Tables |
 | --- | --- |
 | `staging` | `source_files`, `tracker_rows`, `rejected_rows` |
-| `core` | `customers`, `orders`, `documents`, `document_pages`, `order_document_pages` |
-| `ops` | `schema_versions`, `ingestion_runs`, `ocr_attempts`, `review_events` |
+| `core` | `customers`, `orders`, `rental_orders`, `rental_order_tickets`, `rental_order_pages`, `documents`, `document_pages`, `order_document_pages` |
+| `ops` | `schema_versions`, `ingestion_runs`, `ocr_attempts`, `review_events`, `manual_page_approvals`, `page_extractions`, `ticket_downloads`, `ocr_result_cache` |
 
-SQLite maps these logical schemas into one local namespace, while retaining the same table/constraint model. Primary and foreign keys enforce relationships. Uniqueness covers source checksums, source-system/order numbers, source-system/shipment numbers, document checksums, document/page pairs, and association methods. Check constraints restrict statuses and require positive page numbers/counts. SQLite foreign keys are enabled explicitly.
+How the order numbering maps onto these tables (see [order numbering](demo-workflow.md#order-numbering)):
 
-`ocr_workspace/storage.py` defines the schema and versioned startup migrations. Migration 2 adds manual page approvals; migration 3 adds rental orders, their child tickets and identified pages, and permits multiple tickets to share a shipment. Migration 4 retains local extraction for every page independently of its match status. Migration 5 adds version-specific download receipts. Migration 6 adds the OCR result cache. Existing pages, attempts and approvals survive upgrades. The numbered SQL files in `database/` describe the PostgreSQL changes. Run `python3 scripts/export_schema.py` to export a current schema snapshot to `database/current_schema.sql`; it does not rewrite historical migrations.
+| Table | Holds |
+| --- | --- |
+| `core.orders` | One row per work order or shipment. `order_number` is `W-0000001` or `Shipment 00001`; `order_type` is `RENTAL` or `SALE`. |
+| `core.rental_orders` | One row per parent order, rental **and** sales. `rental_number` is `RO-0000002` or `SO-0000001`. Despite its name, this table holds sales orders too. |
+| `core.rental_order_tickets` | Links each work order or shipment to its one parent order (`rental_id`). |
+| `core.rental_order_pages` | Each scanned page on which a parent order was identified, with its locally extracted fields. This keeps a page under its RO or SO even when its work order or shipment was not read. |
+
+SQLite maps these logical schemas into one local namespace, while retaining the same table/constraint model. Primary and foreign keys enforce relationships. Uniqueness covers source checksums, source-system/order numbers, document checksums, document/page pairs, and association methods. Check constraints restrict statuses and require positive page numbers/counts. SQLite foreign keys are enabled explicitly.
+
+`ocr_workspace/storage.py` defines the schema and versioned startup migrations. Migration 2 adds manual page approvals; migration 3 adds the parent-order tables (`rental_orders`, `rental_order_tickets`, `rental_order_pages`). Migration 4 retains local extraction for every page independently of its match status. Migration 5 adds version-specific download receipts. Migration 6 adds the OCR result cache. Migration 7 leaves one number per `orders` row by dropping the `shipment_number` column (`database/007_single_order_number.sql`). Schema versions run from 1 to 7. Existing pages, attempts and approvals survive upgrades. The numbered SQL files in `database/` describe the PostgreSQL changes. Run `python3 scripts/export_schema.py` to export a current schema snapshot to `database/current_schema.sql`; it does not rewrite historical migrations.
 
 ## ETL behavior
 
 Extraction retains file checksum/name, worksheet, row number, run ID, and original string-rendered values. Normalization preserves IDs as text, handles trailing numeric `.0`, trims strings, normalizes supported statuses, parses dates, and validates required customer/identifier values and positive expected page counts.
+
+A tracker row is one work order or one shipment. Two columns identify it:
+
+| Column | Rental row | Sales row |
+| --- | --- | --- |
+| `Order` | `RO-0000002` | `SO-0000001` |
+| `Work order` | `W-0000001` | `Shipment 00001` |
+
+`Work order` must hold exactly one work order or shipment; it sets the order type to `RENTAL` or `SALE`. `Order` must hold the matching parent: an `RO-…` for a work order, an `SO-…` for a shipment. Rows that break these rules are quarantined, as is a second row for the same work order or shipment in one tracker. The optional `Address` column is stored on the parent order.
 
 `Customer_ID` is used as the source customer identity when supplied. Legacy trackers fall back to a normalized-name hash. That fallback can merge same-named customers; production source contracts should supply stable IDs. Business keys are scoped by `--source-system`; use the same value for tracker ingestion and OCR processing.
 
@@ -105,8 +123,8 @@ python3 scripts/validate_ocr.py --limit 1
 python3 scripts/validate_ocr.py --limit 120
 ```
 
-Configure the Azure endpoint/key in local `.env`. The first provider result must match its expected shipment before additional pages are submitted. Existing completed attempts are reused; `--retry-errors` explicitly retries failed attempts. Access failures or three consecutive provider errors stop the run. Requests are sequential and separated by a pause; the SDK handles provider polling/retries. Azure usage charges may apply.
+Configure the Azure endpoint/key in local `.env`. The first provider result must match its expected order number before additional pages are submitted. Existing completed attempts are reused; `--retry-errors` explicitly retries failed attempts. Access failures or three consecutive provider errors stop the run. Requests are sequential and separated by a pause; the SDK handles provider polling/retries. Azure usage charges may apply.
 
 The validator compares every returned identifier against page-specific manifest ground truth, including a wrong identifier that happens to match a different valid order. JSON and CSV reports record passed, mismatch, error, and pending counts, plus expected/actual identifiers. Credentials, endpoints, and raw OCR text are excluded. Reports remain local in `demo_runtime/ocr_validation_report.json` and `.csv`.
 
-Inspect a run through the local JSON/CSV report or the isolated `demo_runtime/ocr_validation.sqlite` database; the validator always calls the provider and bypasses the result cache. The validation database contains 20 distinct tickets and 120 pages and is separate from the browser workspace at http://127.0.0.1:8700. The latest recorded run is in [validation results](ocr-validation-results.md).
+Inspect a run through the local JSON/CSV report or the isolated `demo_runtime/ocr_validation.sqlite` database; the validator always calls the provider and bypasses the result cache. The validation database contains 20 distinct tickets and 120 pages and is separate from the browser workspace at http://127.0.0.1:8700. The latest recorded run is in [validation results](ocr-validation-results.md); it was made on an older numbering and has not been repeated on the current one.

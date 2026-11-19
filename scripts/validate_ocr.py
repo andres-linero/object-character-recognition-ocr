@@ -53,7 +53,7 @@ def prepare():
                 raise ValueError("Tracker schemas differ")
             fields = reader.fieldnames
             rows.extend(reader)
-        expectations = [dict(shipment=ticket["shipment"], copy=page["copy"], paper=page["document_type"])
+        expectations = [dict(order_number=ticket["order_id"], copy=page["copy"], paper=page["document_type"])
                         for ticket in manifest["tickets"] for page in ticket["pages"]]
         batches.append((target, expectations))
     buffer = io.StringIO(newline="")
@@ -76,7 +76,7 @@ def prepare():
                 page_id = connection.scalar(select(db.pages.c.id).where(
                     db.pages.c.document_id == document_id, db.pages.c.page_number == number))
                 order_id = connection.scalar(select(db.orders.c.id).where(
-                    db.orders.c.source_system == "demo", db.orders.c.shipment_number == expectation["shipment"]))
+                    db.orders.c.source_system == "demo", db.orders.c.order_number == expectation["order_number"]))
                 upsert(connection, db.associations, ["order_id", "page_id", "method"],
                     dict(order_id=order_id, page_id=page_id, method="synthetic_manifest"))
                 todo.append(dict(page_id=page_id, document=pdf.name, page=number, **expectation))
@@ -88,13 +88,13 @@ def write_report(todo, results):
     for item in todo:
         actual = results.get(item["page_id"])
         records.append(dict(document=item["document"], page=item["page"], paper=item["paper"], copy=item["copy"],
-            expected=item["shipment"], actual=actual.get("identifier") if actual else None,
-            outcome=("passed" if actual["status"] == "success" and actual["identifier"] == item["shipment"] else
+            expected=item["order_number"], actual=actual.get("identifier") if actual else None,
+            outcome=("passed" if actual["status"] == "success" and actual["identifier"] == item["order_number"] else
                      "error" if actual["status"] == "error" else "mismatch") if actual else "pending",
             error_code=actual.get("error_code") if actual else None))
     counts = {name: sum(row["outcome"] == name for row in records) for name in ("passed", "mismatch", "error", "pending")}
     report = dict(updated_at=datetime.now(timezone.utc).isoformat(), provider="Azure Document Intelligence prebuilt-read",
-                  synthetic=True, expected_tickets=len({p["shipment"] for p in todo}), total_pages=len(todo), **counts, pages=records)
+                  synthetic=True, expected_tickets=len({p["order_number"] for p in todo}), total_pages=len(todo), **counts, pages=records)
     temporary = REPORT.with_suffix(".tmp")
     temporary.write_text(json.dumps(report, indent=2) + "\n")
     temporary.replace(REPORT)
@@ -149,7 +149,7 @@ def main():
                     break
                 time.sleep(1.0)
             first = results.get(todo[0]["page_id"])
-            if index == 0 and (not first or first["status"] != "success" or first["identifier"] != item["shipment"]):
+            if index == 0 and (not first or first["status"] != "success" or first["identifier"] != item["order_number"]):
                 print("Smoke test did not pass; remaining pages were not submitted.", flush=True)
                 break
         report = write_report(todo, results)

@@ -58,13 +58,20 @@ def parse_date(value, name):
 
 
 def transform(row):
-    order = re.sub(r"\.0$", "", text(row.get("Order_ID")))
-    shipment = re.sub(r"\.0$", "", text(row.get("SO"))).lstrip("0")
+    # Tracker columns: "Order" is the parent (RO-… or SO-…), "Work order" is
+    # the document created from it (W-… for a rental, "Shipment 00001" for a sale).
+    from .ocr import PARENT_OF, parse_document_identifiers
+    printed = parse_document_identifiers(text(row.get("Work order")))
+    parents = parse_document_identifiers(text(row.get("Order")))
     customer = text(row.get("Customer_name", row.get("Customer")))
-    if not re.fullmatch(r"(?:W-)?\d{4,12}", order, re.IGNORECASE):
-        raise ValueError("Order_ID must be a numeric identifier, optionally prefixed W-")
-    if not re.fullmatch(r"\d{4,8}", shipment):
-        raise ValueError("SO must contain 4 to 8 digits after normalization")
+    kind = next((k for k in PARENT_OF if k in printed), None)
+    if kind is None or len(printed) != 1:
+        raise ValueError('"Work order" must be a work order (W-…) or a shipment (Shipment …)')
+    order = printed[kind]
+    rental = parents.get(PARENT_OF[kind])
+    if rental is None or len(parents) != 1:
+        raise ValueError('"Order" must be RO-… for a work order and SO-… for a shipment')
+    order_type = "RENTAL" if kind == "work_order" else "SALE"
     if not customer:
         raise ValueError("Customer_name is required")
     statuses = {"OPEN": "OPEN", "COMPLETE": "COMPLETE", "COMPLETED": "COMPLETE", "CLOSED": "COMPLETE"}
@@ -78,13 +85,13 @@ def transform(row):
     customer_key = text(row.get("Customer_ID")) or "legacy-name:" + hashlib.sha256(customer.casefold().encode()).hexdigest()
     if len(customer_key) > 100:
         raise ValueError("Customer_ID is too long")
-    return {"order_number": order.upper(), "shipment_number": shipment,
+    return {"order_number": order, "rental_number": rental or None,
             "customer_name": customer, "customer_key": customer_key,
             "ship_to": text(row.get("Ship_to")), "status": status,
             "order_date": parse_date(row.get("Today"), "Today"),
             "deadline": parse_date(row.get("Deadline"), "Deadline"),
             "requested_by": text(row.get("Requested by")),
-            "order_type": text(row.get("Order_Type")) or "RENTAL",
+            "order_type": order_type,
             "expected_pages": int(float(count)) if count else None}
 
 
@@ -131,20 +138,27 @@ def ingest_tracker(store, path, source_system="tracker", synthetic=False):
                     values = transform(row)
                     pair = values["order_number"]
                     if pair in encountered:
-                        raise ValueError("Duplicate Order_ID within this tracker")
+                        raise ValueError("Duplicate work order or shipment within this tracker")
                     encountered.add(pair)
                     name = values.pop("customer_name")
                     customer_key = values.pop("customer_key")
+                    rental_number = values.pop("rental_number")
                     with connection.begin_nested():
                         customer_id = upsert(connection, db.customers, ["source_system", "external_key"],
                             {"source_system": source_system, "external_key": customer_key, "name": name})
-                        upsert(connection, db.orders, ["source_system", "order_number"],
+                        order_id = upsert(connection, db.orders, ["source_system", "order_number"],
                             dict(values, customer_id=customer_id, source_system=source_system,
                                  source_id=source, source_sheet=sheet))
+                        if rental_number:
+                            # A work order or shipment belongs to exactly one parent order.
+                            rental_id = upsert(connection, db.rental_orders, ["source_system", "customer_id", "rental_number"],
+                                {"source_system": source_system, "customer_id": customer_id,
+                                 "rental_number": rental_number, "address": text(row.get("Address"))})
+                            upsert(connection, db.rental_tickets, ["order_id"], {"order_id": order_id, "rental_id": rental_id})
                     loaded += 1
                 except (ValueError, IntegrityError) as exc:
                     failed += 1
-                    reason = str(exc) if isinstance(exc, ValueError) else "Conflicting shipment or relational constraint"
+                    reason = str(exc) if isinstance(exc, ValueError) else "Conflicting order or relational constraint"
                     connection.execute(db.rejected.insert().values(raw_row_id=raw_id, reason=reason))
             connection.execute(db.runs.update().where(db.runs.c.id == run_id).values(
                 finished_at=db.utcnow(), status="partial" if failed else "success",
@@ -178,14 +192,13 @@ def register_manifest(store, path, source_system="demo"):
                 raise ValueError("Manifest must enumerate each page exactly once")
             order_id = connection.scalar(select(db.orders.c.id).where(
                 db.orders.c.source_system == source_system,
-                db.orders.c.order_number == ticket["order_id"],
-                db.orders.c.shipment_number == ticket["shipment"]))
+                db.orders.c.order_number == ticket["order_id"]))
             if order_id is None:
                 raise ValueError("Import the matching tracker before its manifest")
             document_id = upsert(connection, db.documents, ["sha256"],
                 {"sha256": checksum(pdf), "path": str(pdf), "page_count": actual_pages, "synthetic": True})
             for mapping in mappings:
-                if mapping["expected_ocr_id"] != ticket["shipment"]:
+                if mapping["expected_ocr_id"] != ticket["order_id"]:
                     raise ValueError("Manifest page identifier disagrees with its ticket")
                 page_id = upsert(connection, db.pages, ["document_id", "page_number"],
                     {"document_id": document_id, "page_number": mapping["page"]})

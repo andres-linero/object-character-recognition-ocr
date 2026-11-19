@@ -58,7 +58,7 @@ def process_page(store, page_id, source_system="tracker", extractor=None, on_sta
     SHA-256 of the exact header crop it would receive. Injected extractors
     (tests, alternate providers) always run and never read or write the cache.
     """
-    from .ocr import ParsedIdentifier, extract_order_identity
+    from .ocr import PARENT_OF, ParsedIdentifier, extract_order_identity, mixed_families, parse_identifier
     use_cache = use_cache and extractor is None
     if extractor is None:
         extractor = extract_order_identity
@@ -95,67 +95,60 @@ def process_page(store, page_id, source_system="tracker", extractor=None, on_sta
         if on_stage:
             on_stage("matching")
         if isinstance(parsed, ParsedIdentifier):
-            identifier, kind = parsed.value, parsed.kind
-            if not document_driven and kind in {"rental_order", "customer_order"}:
-                # Tracker rows are keyed by shipment or work order. A header that also
-                # prints its parent rental or customer order must still match its row.
-                for tracked in ("shipment", "work_order"):
-                    if parsed.identifiers.get(tracked):
-                        identifier, kind = parsed.identifiers[tracked], tracked
-                        break
+            identifier, kind, identifiers = parsed.value, parsed.kind, parsed.identifiers
         else:
-            # Compatibility callbacks return W- work orders or numeric shipments.
-            identifier = str(parsed).strip() if parsed is not None else None
-            kind = "work_order" if identifier and identifier.upper().startswith(("W-", "TK-", "OD-")) else "shipment"
+            # Injected extractors may return a bare "W-0000001", "Shipment 00001",
+            # "RO-…" or "SO-…" string. Anything else is not an identifier.
+            reparsed = parse_identifier(str(parsed)) if parsed is not None else None
+            identifier, kind = (reparsed.value, reparsed.kind) if reparsed else (None, None)
+            identifiers = reparsed.identifiers if reparsed else {}
         if fields is not None:
-            fields['ocr_identifiers'] = parsed.identifiers if isinstance(parsed, ParsedIdentifier) else {}
+            fields['ocr_identifiers'] = identifiers
             fields['ocr_identifier_kind'] = kind if identifier else None
             save_page_fields(store, page_id, fields)
-        identifier_conflict = False
-        if document_driven and isinstance(parsed, ParsedIdentifier):
-            from .page_review import normalized
-            names = {'shipment': 'shipment', 'work_order': 'work_order', 'rental_order': 'parent_rental_number', 'customer_order': 'customer_order_number'}
-            identifier_conflict = any(fields.get(names[k]) and normalized(value, names[k]) != normalized(fields[names[k]], names[k])
-                for k, value in parsed.identifiers.items() if k in names)
-            if identifier_conflict:
-                error = 'identifier_fields_disagree'
-        if fields is not None and fields.get('rental_number_conflict'):
-            identifier_conflict = True
-            error = 'rental_number_conflict'
+        # A page is a rental page (RO + W) or a sales page (SO + Shipment), never both.
+        if mixed_families(identifiers):
+            error = 'rental_and_sales_numbers_on_one_page'
         detected = None
-        rental_id = None
-        if document_driven and identifier and fields.get('parent_rental_number'):
-            from .document_data import observe_rental_context
-            try:
-                rental_id = observe_rental_context(store, page, page_id, fields, identifier, kind)
-            except ValueError:
-                error = 'rental_order_conflict'
-        if document_driven and (fields.get('work_order') or '').startswith('OD-'):
-            # RO/SO can group several orders. A local full-page read of OD must
-            # not hide a failed read of OD inside the fixed provider crop.
-            provider_order = parsed.identifiers.get('work_order') if isinstance(parsed, ParsedIdentifier) else None
-            provider_order = provider_order or (identifier if kind == 'work_order' else None)
-            if not provider_order:
-                identifier_conflict = True
-                error = error or 'order_number_not_read'
-        if document_driven and identifier and not identifier_conflict and (not fields.get('parent_rental_number') or rental_id):
-            from .document_data import observe_order
-            try:
-                detected = observe_order(store, page, page_id, fields, identifier, kind)
-            except ValueError:
-                error = 'ticket_identifier_missing' if rental_id and not fields.get('work_order') else 'document_fields_incomplete_or_conflicting'
-        column = db.orders.c.order_number if kind == "work_order" else db.orders.c.shipment_number
+        if document_driven and not error:
+            from .document_data import observe_order, observe_rental_context
+            from .page_review import normalized
+            local = {'work_order': fields.get('order_number'), 'shipment': fields.get('order_number'),
+                     'rental_order': fields.get('parent_order_number'), 'sales_order': fields.get('parent_order_number')}
+            if fields.get('mixed_order_types'):
+                error = 'rental_and_sales_numbers_on_one_page'
+            elif any(local[k] and normalized(value, k) != normalized(local[k], k) for k, value in identifiers.items()):
+                error = 'identifier_fields_disagree'
+            if not error and identifier and fields.get('parent_order_number'):
+                try:
+                    observe_rental_context(store, page, page_id, fields, identifier, kind)
+                except ValueError:
+                    error = 'parent_order_conflict'
+            # The parent order groups several work orders or shipments. A local
+            # full-page read must not hide a number the provider could not read in its crop.
+            if not error and kind in PARENT_OF.values():
+                error = 'work_order_not_read' if kind == 'rental_order' else 'shipment_not_read'
+            if not error and identifier:
+                try:
+                    detected = observe_order(store, page, page_id, fields, identifier, kind)
+                except ValueError:
+                    error = 'document_fields_incomplete_or_conflicting'
         with store.engine.begin() as connection:
-            matches = [detected] if detected else [] if document_driven or not identifier or kind in {'customer_order', 'rental_order'} else connection.execute(select(db.orders.c.id).where(
-                db.orders.c.source_system == source_system,
-                column == identifier)).scalars().all()
+            if document_driven:
+                matches = [detected] if detected else []
+            elif error or kind not in PARENT_OF:
+                matches = []
+            else:
+                matches = connection.execute(select(db.orders.c.id).where(
+                    db.orders.c.source_system == source_system,
+                    db.orders.c.order_number == identifier)).scalars().all()
             if len(matches) == 1:
                 upsert(connection, db.associations, ["order_id", "page_id", "method"],
                     {"order_id": matches[0], "page_id": page_id, "method": "azure_ocr"})
                 status = "success"
             else:
                 status = "no_match"
-                error = error or ("unknown_or_ambiguous_order" if identifier else "identifier_not_found")
+                error = error or ("unknown_order" if identifier else "identifier_not_found")
             connection.execute(db.attempts.update().where(db.attempts.c.id == attempt_id).values(
                 status=status, identifier=identifier, error_code=error, finished_at=db.utcnow(),
                 provider=CACHE_PROVIDER if cached else PROVIDER))

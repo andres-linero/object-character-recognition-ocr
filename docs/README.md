@@ -4,13 +4,13 @@ Start with the [project README](../README.md) to install and launch the app.
 
 | Document | Purpose |
 | --- | --- |
-| [Demo workflow](demo-workflow.md) | Current sample cases, review steps and persistence |
+| [Demo workflow](demo-workflow.md) | Order numbering, current sample cases, review steps and persistence |
 | [Project reference](project-reference.md) | Setup, validation, architecture overview and additional output examples |
 | [Product UI](product-ui.md) | Order Tracker frontend, API, and local startup |
-| [Live OCR validation](ocr-validation-results.md) | Results and limits for the two 60-page synthetic batches |
+| [Live OCR validation](ocr-validation-results.md) | Results and limits for the two 60-page synthetic batches, recorded on an older numbering and not repeated on the current one |
 | [Database and ETL](data-pipeline.md) | SQL storage, migrations, ingestion, and synthetic preview |
 | [Architecture](architecture.md) | Current components, data flow, deployment boundary, and limitations |
-| [Synthetic demo dataset](demo-data.md) | Generate 100 fictional packets and a matching tracker |
+| [Synthetic demo dataset](demo-data.md) | Generate 100 fictional packets (work orders under rental orders, shipments under sales orders) with a matching tracker, and the 300-order sample scans |
 | [Configuration and data](configuration.md) | Environment variables, workbook schema, and generated files |
 | [Operations](operations.md) | Startup, diagnosis, recovery, and retention |
 | [ADR 0001](decisions/0001-modular-monolith.md) | Superseded single-app proposal for the retired Streamlit version, with its outcome |

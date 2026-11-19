@@ -4,7 +4,7 @@ Setup, technical details, and additional output examples for [Order Scanner](../
 
 ### Output: organized order packets
 
-After review, download the ready orders as a ZIP. The app records the download and offers **Download again**. Extracted files are organized into rental-order folders containing compiled order PDFs.
+After review, download the ready orders as a ZIP. The app records the download and offers **Download again**. In the ZIP, each document sits in a folder named after its order: a rental order's folder holds its work orders and a sales order's folder holds its shipments. The recording and screenshots below predate the current [order numbering](demo-workflow.md#order-numbering) and show earlier labels and an earlier folder layout.
 
 ![Recording of downloading the completed scan ZIP](media/order-scanner/zip-download.gif)
 
@@ -27,18 +27,40 @@ After review, download the ready orders as a ZIP. The app records the download a
 
 After setup, upload `Scans/incomming_scan/batch_01_8_orders.pdf`.
 
-- It contains **48 shuffled pages across 8 work orders, 2 rental orders and 4 shipments**.
-- Six orders have normally positioned identifiers. Two each have one order number shifted below the fixed Azure crop, while the full original image still contains it.
-- The intended result is six automatically complete orders and two requiring visual review. Actual provider readings determine the result; these are test expectations, not an accuracy measurement.
+- It contains **48 shuffled pages across 8 six-page documents**: 2 rental orders (`RO-`) with 3 work orders (`W-`) each, and 2 sales orders (`SO-`) with one shipment each.
+- Six documents have normally positioned identifiers. Two work orders each have one work-order line shifted below the fixed Azure crop, while the full original image still contains it.
+- The intended result is six automatically complete documents and two work orders requiring visual review. Actual provider readings determine the result; these are test expectations, not an accuracy measurement.
 - Open **Flags → Fix pages**, compare the candidate image with its target, and approve the correct printed page. Then download the completed packet.
 
-The generator can produce eight batches totaling **64 work orders and 384 pages**. These are synthetic fixture sizes, not production-volume claims. For a separate sample with all identifiers inside the crop:
+The generator can produce eight batches totaling **64 documents and 384 pages**: 48 work orders under 16 rental orders, and 16 shipments under 16 sales orders. These are synthetic fixture sizes, not production-volume claims. For a separate sample with all identifiers inside the crop:
 
 ```sh
 uv run --locked python scripts/create_rental_hierarchy_sample.py --clean --batch-number 10
 ```
 
 This adds `batch_10_ALL_CORRECT_8_orders.pdf` without submitting it or preloading orders. See the [demo workflow](demo-workflow.md) for sample details, identifier definitions and review behavior.
+
+For larger scans in the owner's page counts (three-page work orders, one-page shipments):
+
+```sh
+uv run --locked python scripts/create_order_samples.py
+```
+
+This writes 300 orders (150 rental, 150 sales) as six shuffled PDFs of 155 to 240 pages, plus `orders.csv` and `manifest.json`, to `demo_data/order_samples/`. Add `--register` to copy the PDFs into `Scans/incomming_scan/` and allow them to be uploaded. **Every uploaded page is one billable Azure read, and the six files hold 1,261 pages.** Upload one file first, and set `OCR_MAX_PAGES_PER_FILE` to cap a file. Details are in [300-order sample scans](demo-data.md#300-order-sample-scans).
+
+### Order numbering
+
+```text
+Shared count for orders: 1, 2, 3, ...
+
+RENTAL                                 SALE
+RO-0000002  (rental order)             SO-0000001  (sales order)
+ ├─ W-0000001   work order, 3 pages     ├─ Shipment 00001   1 page
+ └─ W-0000002   work order, 3 pages     ├─ Shipment 00002   1 page
+                                        └─ Shipment 00003   1 page
+```
+
+Rental orders and sales orders are the parent orders and share one count. A rental order creates work orders; a sales order creates shipments. A page prints its order and its own document. The tracker leads with **Order**, **Work order** (which holds the shipment for a sale) and **Address**. The full rules are in the [demo workflow](demo-workflow.md#order-numbering).
 
 ## How it works
 
@@ -57,7 +79,7 @@ flowchart LR
     SQL --> Output[Compiled PDFs and ZIP downloads]
 ```
 
-Local extraction reads customer, address and printed-page details. Azure Document Intelligence reads the right half of the top quarter of each page. Order, rental-order and shipment identifiers stay separate; a matching shipment alone cannot verify a work-order page.
+Local extraction reads customer, address and printed-page details. Azure Document Intelligence reads the right half of the top quarter of each page. A page is identified by its own document: the work order (`W-0000001`) on a rental page, or the shipment (`Shipment 00001`) on a sales page. A readable order number (`RO-` or `SO-`) alone does not verify a page; that page is kept under its order and flagged for review.
 
 The frontend uses HTML, CSS and JavaScript. FastAPI serves the UI and API, and server-sent events deliver processing progress. SQLAlchemy manages the local SQLite schema and migrations. Separate ingestion tools support PostgreSQL and workbook imports.
 
@@ -65,7 +87,7 @@ The frontend uses HTML, CSS and JavaScript. FastAPI serves the UI and API, and s
 
 - **Recoverable processing:** durable queue markers retain pending submissions across restarts. A process lock coordinates the local worker, and persisted attempts prevent automatic repeat calls for already attempted pages. Failed attempts remain visible for deliberate recovery.
 - **Preserved evidence:** database pages reference checksum-verified original uploads. Manual approval adds a separate record instead of replacing the original OCR result.
-- **Explicit review rules:** known identity and printed-page conflicts block assignment on both the server and client. Unreadable identity or shipment differences require acknowledgment.
+- **Explicit review rules:** known identity and printed-page conflicts block assignment on both the server and client. A page whose identity could not be read, or whose Azure reading differs from the target, requires explicit acknowledgment.
 - **Completeness before download:** each expected printed-page slot must be accounted for without duplicates. ZIP downloads include ready orders from the selected scan.
 - **Versioned download history:** PDF and ZIP downloads record the served document version. Previews do not mark orders downloaded; earlier receipts remain when source pages change.
 
@@ -112,7 +134,7 @@ Initialization migrates existing storage without clearing it. Sample refresh bac
 
 ## Validation
 
-The latest local run passed **128 Python tests** and **29 frontend tests**, with **9 Python tests skipped**. Tests cover upload boundaries, page matching, review conflicts, PDF readiness, download marks and reset protection. Azure responses are mocked. Optional PostgreSQL integration tests require a disposable `TEST_DATABASE_URL`.
+The latest local run passed **256 Python tests** and **30 frontend tests**, with **40 Python tests skipped**. Tests cover upload boundaries, page matching, review conflicts, PDF readiness, download marks and reset protection. Azure responses are mocked. Optional PostgreSQL integration tests require a disposable `TEST_DATABASE_URL`.
 
 Run the checks from a feature branch:
 
@@ -157,4 +179,4 @@ The crop is a fixed region, not a detector for personal information. Current sam
 - [Operations and recovery](operations.md)
 - [Database and ingestion tools](data-pipeline.md)
 
-[Earlier recordings](walkthroughs.md) and [historical Azure validation](ocr-validation-results.md) describe previous workflows and fixtures. They do not demonstrate the current interface or measure the current sample set.
+[Earlier recordings](walkthroughs.md) and [historical Azure validation](ocr-validation-results.md) describe previous workflows and fixtures. They do not demonstrate the current interface or measure the current sample set. The validation was recorded on an older numbering and has not been repeated on the current one.

@@ -94,7 +94,7 @@ def prepare_ticket_pdfs(store, document_id, output, allow_partial=False):
             if len(verified) != len(pages):
                 raise ValueError('Ticket PDF page count differs')
         temporary.replace(target)
-        ready.append(dict(id=order_id, work_order=order['order_number'], shipment=order['shipment_number']))
+        ready.append(dict(id=order_id, order_number=order['order_number'], order_type=order['order_type']))
     return ready
 
 

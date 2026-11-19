@@ -1,5 +1,7 @@
 """Exercise product API against real SQL and generated multi-ticket source PDFs."""
 
+import csv
+
 import pymupdf as fitz
 from pathlib import Path
 import pytest
@@ -12,10 +14,10 @@ from ocr_workspace.web_api import create_app
 from scripts import create_demo_data as demo
 
 
-@pytest.fixture
-def api_workspace(tmp_path):
+def build_workspace(tmp_path, count):
+    """Tracker-driven workspace: every order is expected; only the first has been read by OCR."""
     dataset = tmp_path / "demo_data"
-    manifest = demo.generate_dataset(dataset, count=2, min_pages=6, max_pages=6, rasterize=False)
+    manifest = demo.generate_dataset(dataset, count=count, min_pages=6, max_pages=6, rasterize=False)
     path = tmp_path / "workspace.sqlite"
     store = db.Store(db.sqlite_url(path))
     store.migrate()
@@ -30,7 +32,7 @@ def api_workspace(tmp_path):
     with store.engine.begin() as connection:
         number = 0
         for ticket in manifest["tickets"]:
-            order_id = connection.scalar(select(db.orders.c.id).where(db.orders.c.shipment_number == ticket["shipment"]))
+            order_id = connection.scalar(select(db.orders.c.id).where(db.orders.c.order_number == ticket["order_id"]))
             for _ in ticket["pages"]:
                 number += 1
                 page_id = connection.scalar(select(db.pages.c.id).where(db.pages.c.document_id == document_id, db.pages.c.page_number == number))
@@ -40,8 +42,22 @@ def api_workspace(tmp_path):
                     etl.upsert(connection, db.associations, ["order_id", "page_id", "method"],
                         dict(order_id=order_id, page_id=page_id, method="azure_ocr"))
                     connection.execute(db.attempts.insert().values(page_id=page_id, started_at=db.utcnow(),
-                        finished_at=db.utcnow(), provider="azure_document_intelligence", status="success", identifier=ticket["shipment"]))
-    app = create_app(root=tmp_path, databases={"validation": path}, allowed_roots=[dataset])
+                        finished_at=db.utcnow(), provider="azure_document_intelligence", status="success", identifier=ticket["order_id"]))
+    return store, dataset, create_app(root=tmp_path, databases={"validation": path}, allowed_roots=[dataset])
+
+
+@pytest.fixture
+def api_workspace(tmp_path):
+    store, dataset, app = build_workspace(tmp_path, count=2)
+    with TestClient(app) as client:
+        yield client, store, dataset
+    store.close()
+
+
+@pytest.fixture
+def mixed_workspace(tmp_path):
+    """Three work orders of one rental order, and one shipment of one sales order."""
+    store, dataset, app = build_workspace(tmp_path, count=4)
     with TestClient(app) as client:
         yield client, store, dataset
     store.close()
@@ -51,11 +67,17 @@ def test_tracker_filters_real_rows_and_returns_source_addresses(api_workspace):
     client, store, dataset = api_workspace
     rows = client.get('/api/workspaces/validation/tickets').json()['tickets']
     assert len(rows) == 2
-    assert rows[0]['work_order'] == 'W-990002'
-    assert rows[0]['billing_address'] == '101 Simulation Way, Demo City, ZZ 00000'
+    # Sorted by (parent order, document number), descending.
+    assert [r['order_number'] for r in rows] == ['W-0000002', 'W-0000001']
+    assert rows[0]['billing_address'] == '100 Simulation Way, Demo City, ZZ 00000'
     assert rows[0]['billing_address_source'] == 'synthetic_manifest'
-    assert rows[0]['rental_order'] == rows[0]['parent_rental_number'] == 'RO-700002'
-    assert len(client.get('/api/workspaces/validation/tickets?q=900001').json()['tickets']) == 1
+    assert rows[0]['order_type'] == 'RENTAL' and rows[0]['parent_order_number'] == 'RO-0000001'
+    assert rows[0]['parent_id'] and rows[0]['parent_id'] == rows[1]['parent_id']
+    assert not {'work_order', 'shipment', 'ticket_number', 'customer_order_number', 'rental_order',
+                'parent_rental_number', 'rental_id'} & set(rows[0])
+    assert len(client.get('/api/workspaces/validation/tickets?q=w-0000001').json()['tickets']) == 1
+    assert len(client.get('/api/workspaces/validation/tickets?q=ro-0000001').json()['tickets']) == 2
+    assert client.get('/api/workspaces/validation/tickets?q=WO-990001').json()['tickets'] == []
     assert len(client.get('/api/workspaces/validation/tickets?ocr=verified').json()['tickets']) == 1
     assert client.get('/api/workspaces/validation/tickets?q=no-match').json()['tickets'] == []
     assert 'path' not in rows[0]
@@ -75,7 +97,8 @@ def test_ticket_preview_and_download_extract_only_its_own_pages(api_workspace):
     ready = next(t for t in client.get('/api/workspaces/validation/tickets').json()['tickets'] if t['download_ready'])
     download = client.get(f"/api/workspaces/validation/tickets/{ready['id']}/download")
     assert download.status_code == 200
-    assert 'RO-700001' in download.headers['content-disposition']
+    assert ('filename="Amber Workshop__RO-0000001__W-0000001__100 Simulation Way, Demo City, ZZ 00000.pdf"'
+            in download.headers['content-disposition'])
     inline = client.get(f"/api/workspaces/validation/tickets/{ready['id']}/download?preview=true")
     assert inline.status_code == 200
     assert inline.headers['content-disposition'].startswith('inline;')
@@ -83,7 +106,110 @@ def test_ticket_preview_and_download_extract_only_its_own_pages(api_workspace):
         assert len(compiled) == 6
     with fitz.open(stream=download.content, filetype='pdf') as pdf:
         assert len(pdf) == 6
-        assert all('900001' in page.get_text() and '900002' not in page.get_text() for page in pdf)
+        assert all('W-0000001' in page.get_text() and 'W-0000002' not in page.get_text() for page in pdf)
+    assert all(p['matched'] and p['expected'] == p['extracted'] == 'W-0000001' for p in
+               client.get(f"/api/workspaces/validation/tickets/{ready['id']}").json()['pages'])
+    for route in ('', '/download', '/review', '/page-approvals'):
+        unknown = f'/api/workspaces/validation/tickets/unknown{route}'
+        payload = {'reviewed': True} if route == '/review' else {'page_id': 'unknown', 'printed_page': 1}
+        response = client.post(unknown, json=payload) if route in ('/review', '/page-approvals') else client.get(unknown)
+        assert (response.status_code, response.json()) == (404, {'detail': 'Order not found'})
+
+
+def test_tracker_orders_are_work_orders_or_shipments_and_each_is_listed_under_its_parent_order(mixed_workspace):
+    client, store, dataset = mixed_workspace
+    rows = client.get('/api/workspaces/validation/tickets').json()['tickets']
+    # Sorted by (parent order, document number), descending.
+    assert [(r['order_number'], r['order_type'], r['parent_order_number']) for r in rows] == [
+        ('Shipment 00001', 'SALE', 'SO-0000002'), ('W-0000003', 'RENTAL', 'RO-0000001'),
+        ('W-0000002', 'RENTAL', 'RO-0000001'), ('W-0000001', 'RENTAL', 'RO-0000001')]
+    sale = rows[0]
+    assert sale['parent_id'] and sale['data_source'] == 'tracker'
+    assert sale['billing_address'] == '100 Simulation Way, Demo City, ZZ 00000'
+    assert len({r['parent_id'] for r in rows[1:]}) == 1 and rows[1]['parent_id'] != sale['parent_id']
+    assert client.get('/api/workspaces/validation/tickets?q=SO-0000002').json()['total'] == 1
+    assert client.get('/api/workspaces/validation/tickets?q=shipment 00001').json()['total'] == 1
+    detail = client.get(f"/api/workspaces/validation/tickets/{sale['id']}").json()
+    assert {p['paper'] for p in detail['pages']} == {'Delivery Ticket', 'Sales Order', 'Delivery Acknowledgement'}
+    assert all(p['expected'] == 'Shipment 00001' for p in detail['pages'])
+    listing = client.get('/api/workspaces/validation/parent-orders').json()
+    assert listing['total'] == 2 and set(listing) == {'parent_orders', 'total'}
+    parents = {parent['parent_number']: parent for parent in listing['parent_orders']}
+    assert set(parents['SO-0000002']) == {'id', 'parent_number', 'order_type', 'customer', 'address', 'tickets',
+                                          'ticket_count', 'ready_tickets', 'unassigned_pages'}
+    # The sale is grouped under its sales order, never standalone and never under the rental order.
+    assert [t['id'] for t in parents['SO-0000002']['tickets']] == [sale['id']]
+    assert (parents['SO-0000002']['order_type'], parents['SO-0000002']['ticket_count']) == ('SALE', 1)
+    assert parents['SO-0000002']['id'] == sale['parent_id']
+    assert parents['SO-0000002']['address'] == '100 Simulation Way, Demo City, ZZ 00000'
+    assert parents['RO-0000001']['order_type'] == 'RENTAL'
+    assert {t['order_number'] for t in parents['RO-0000001']['tickets']} == {'W-0000001', 'W-0000002', 'W-0000003'}
+    assert client.get('/api/workspaces/validation/rental-orders').status_code == 404
+
+
+def test_one_rental_order_lists_all_of_its_work_orders_together(mixed_workspace):
+    client, store, dataset = mixed_workspace
+    rows = list(csv.DictReader((dataset / 'orders.csv').open()))
+    assert [(r['Work order'], r['Order']) for r in rows] == [
+        ('W-0000001', 'RO-0000001'), ('W-0000002', 'RO-0000001'), ('W-0000003', 'RO-0000001'),
+        ('Shipment 00001', 'SO-0000002')]
+    parents = client.get('/api/workspaces/validation/parent-orders').json()['parent_orders']
+    # RO-0000001 is one rental order: its three work orders are listed together under it.
+    assert sorted((parent['parent_number'], parent['ticket_count']) for parent in parents) == [
+        ('RO-0000001', 3), ('SO-0000002', 1)]
+    rental = next(parent for parent in parents if parent['parent_number'] == 'RO-0000001')
+    assert (rental['ready_tickets'], rental['unassigned_pages']) == (1, 0)
+    overview = client.get('/api/workspaces/validation').json()
+    assert overview['parent_orders'] == 2 and 'rental_orders' not in overview
+    # Only the complete work order is in the rental order's download.
+    import io
+    import zipfile
+    archive = client.get(f"/api/workspaces/validation/parent-orders/{rental['id']}/download.zip")
+    assert archive.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as z:
+        assert z.namelist() == ['Amber Workshop__RO-0000001__W-0000001__100 Simulation Way, Demo City, ZZ 00000.pdf']
+    sales = next(parent for parent in parents if parent['parent_number'] == 'SO-0000002')
+    assert client.get(f"/api/workspaces/validation/parent-orders/{sales['id']}/download.zip").status_code == 409
+
+
+def test_one_sales_order_lists_all_of_its_shipments_together(tmp_path):
+    rows = [{'Order': parent, 'Work order': document, 'Customer_name': 'Demo Amber Workshop', 'Status': 'OPEN',
+             'Expected_Pages': pages, 'Address': address}
+            for parent, document, pages, address in [
+                ('SO-0000001', 'Shipment 00001', 1, '101 Simulation Way'), ('RO-0000002', 'W-0000001', 3, '102 Simulation Way'),
+                ('SO-0000001', 'Shipment 00002', 1, '101 Simulation Way'), ('RO-0000002', 'W-0000002', 3, '102 Simulation Way'),
+                ('SO-0000001', 'Shipment 00003', 1, '101 Simulation Way'), ('SO-0000003', 'Shipment 00004', 1, '103 Simulation Way')]]
+    tracker = tmp_path / 'orders.csv'
+    with tracker.open('w', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    path = tmp_path / 'workspace.sqlite'
+    store = db.Store(db.sqlite_url(path))
+    store.migrate()
+    result = etl.ingest_tracker(store, tracker, 'demo', synthetic=True)
+    assert (result['rows_loaded'], result['rows_rejected']) == (6, 0)
+    with TestClient(create_app(root=tmp_path, databases={'validation': path}, allowed_roots=[tmp_path])) as client:
+        listing = client.get('/api/workspaces/validation/parent-orders').json()
+        assert listing['total'] == 3
+        parents = {parent['parent_number']: parent for parent in listing['parent_orders']}
+        assert {number: (parent['order_type'], parent['ticket_count'], parent['address']) for number, parent in parents.items()} == {
+            'SO-0000001': ('SALE', 3, '101 Simulation Way'), 'RO-0000002': ('RENTAL', 2, '102 Simulation Way'),
+            'SO-0000003': ('SALE', 1, '103 Simulation Way')}
+        assert sorted(t['order_number'] for t in parents['SO-0000001']['tickets']) == [
+            'Shipment 00001', 'Shipment 00002', 'Shipment 00003']
+        assert all(t['order_type'] == 'SALE' and t['parent_order_number'] == 'SO-0000001'
+                   and t['parent_id'] == parents['SO-0000001']['id'] and t['expected_pages'] == 1
+                   for t in parents['SO-0000001']['tickets'])
+        assert sorted(t['order_number'] for t in parents['RO-0000002']['tickets']) == ['W-0000001', 'W-0000002']
+        tickets = client.get('/api/workspaces/validation/tickets').json()['tickets']
+        assert [(t['parent_order_number'], t['order_number']) for t in tickets] == [
+            ('SO-0000003', 'Shipment 00004'), ('SO-0000001', 'Shipment 00003'), ('SO-0000001', 'Shipment 00002'),
+            ('SO-0000001', 'Shipment 00001'), ('RO-0000002', 'W-0000002'), ('RO-0000002', 'W-0000001')]
+        assert client.get('/api/workspaces/validation/tickets?q=so-0000001').json()['total'] == 3
+        assert client.get('/api/workspaces/validation').json()['parent_orders'] == 3
+        assert client.get(f"/api/workspaces/validation/parent-orders/{parents['SO-0000001']['id']}/download.zip").status_code == 409
+    store.close()
 
 
 def test_review_is_persisted_with_origin_check(api_workspace):
@@ -192,7 +318,7 @@ def test_outside_document_paths_are_not_served(api_workspace, tmp_path):
 def test_wrong_order_associations_do_not_inflate_verified_page_counts(api_workspace):
     client, store, dataset = api_workspace
     with store.engine.begin() as connection:
-        first = connection.scalar(select(db.orders.c.id).where(db.orders.c.shipment_number == '900001'))
+        first = connection.scalar(select(db.orders.c.id).where(db.orders.c.order_number == 'W-0000001'))
         second_pages = connection.execute(select(db.associations.c.page_id).where(
             db.associations.c.order_id != first, db.associations.c.method == 'synthetic_manifest')).scalars().all()
         for page_id in second_pages:
@@ -216,26 +342,28 @@ def test_scan_results_include_pending_pages_and_only_actual_ocr_matches(api_work
     assert response['counts']['success'] == response['counts']['pending'] == 6
     read = [p for p in response['activity'] if p['status'] == 'success']
     pending = [p for p in response['activity'] if p['status'] == 'pending']
-    assert all(p['matched_order']['work_order'] == 'W-990001' for p in read)
+    assert all(p['matched_order']['order_number'] == 'W-0000001' and p['identifier'] == 'W-0000001' for p in read)
+    assert all(p['matched_order']['order_type'] == 'RENTAL' for p in read)
     assert all(p['matched_order'] is None and p['identifier'] is None for p in pending)
     assert all('path' not in p and p['page_id'] for p in response['activity'])
     assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 0
     page_id = pending[0]['page_id']
     with store.engine.begin() as connection:
         connection.execute(db.attempts.insert().values(page_id=page_id, started_at=db.utcnow(),
-            finished_at=db.utcnow(), provider='azure_document_intelligence', status='no_match', identifier='999999'))
+            finished_at=db.utcnow(), provider='azure_document_intelligence', status='no_match', identifier='W-9999999', error_code='unknown_order'))
     assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 1
     response = client.get('/api/workspaces/validation/activity').json()
     flagged = next(p for p in response['activity'] if p['page_id'] == page_id)
     assert response['current_scan']['total'] == 12
     assert response['current_scan']['completed'] == 7
     assert flagged['status'] == 'no_match' and flagged['matched_order'] is None
+    assert (flagged['identifier'], flagged['error_code']) == ('W-9999999', 'unknown_order')
     issues = client.get('/api/workspaces/validation/activity?issues_only=true').json()
     assert [row['page_id'] for row in issues['activity']] == [page_id]
     assert issues['current_scan']['total'] == 12
     with store.engine.begin() as connection:
         connection.execute(db.attempts.insert().values(page_id=page_id, started_at=db.utcnow(),
-            finished_at=db.utcnow(), provider='azure_document_intelligence', status='success', identifier='900002'))
+            finished_at=db.utcnow(), provider='azure_document_intelligence', status='success', identifier='W-0000002'))
     assert client.get('/api/workspaces/validation').json()['flagged_tickets'] == 0
 
 
@@ -290,8 +418,11 @@ def test_scan_zip_contains_only_ready_ticket_pdfs(api_workspace):
     assert store.rows(select(db.downloads)) == []
     document_id = store.rows(select(db.documents.c.id))[0]['id']
     tickets = prepare_ticket_pdfs(store, document_id, dataset.parent / 'Scans/output')
+    ready = next(t for t in client.get('/api/workspaces/validation/tickets').json()['tickets'] if t['download_ready'])
+    assert tickets == [dict(id=ready['id'], order_number='W-0000001', order_type='RENTAL')]
     progress.update('ready', ready_tickets=tickets)
     revision = progress.snapshot()['revision']
+    assert client.get('/api/workspaces/validation/progress').json()['ready_tickets'] == tickets
     response = client.get(url, params={'revision': revision})
     assert response.status_code == 200
     assert response.headers['content-type'] == 'application/zip'
@@ -300,10 +431,10 @@ def test_scan_zip_contains_only_ready_ticket_pdfs(api_workspace):
     rows = client.get('/api/workspaces/validation/tickets').json()['tickets']
     assert sum(t['downloaded'] for t in rows) == 1
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-        assert archive.namelist() == ['RO-700001/Amber Workshop__W-990001__RO-700001__100 Simulation Way, Demo City, ZZ 00000.pdf']
+        assert archive.namelist() == ['RO-0000001/Amber Workshop__RO-0000001__W-0000001__100 Simulation Way, Demo City, ZZ 00000.pdf']
         with fitz.open(stream=archive.read(archive.namelist()[0]), filetype='pdf') as pdf:
             assert len(pdf) == 6
-            assert all('900001' in page.get_text() and '900002' not in page.get_text() for page in pdf)
+            assert all('W-0000001' in page.get_text() and 'W-0000002' not in page.get_text() for page in pdf)
     assert client.get(url, params={'revision': revision - 1}).status_code == 409
     (dataset.parent / 'Scans/output' / f'ticket-{tickets[0]["id"]}.pdf').unlink()
     assert client.get(url, params={'revision': revision}).status_code == 409
@@ -347,4 +478,60 @@ def test_scan_zip_cannot_export_a_stale_or_replaced_prepared_pdf(api_workspace):
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         with fitz.open(stream=archive.read(archive.namelist()[0]), filetype='pdf') as pdf:
             assert len(pdf) == 6
-            assert all('900001' in page.get_text() for page in pdf)
+            assert all('W-0000001' in page.get_text() for page in pdf)
+
+
+@pytest.mark.parametrize('release', ['version_6', 'wo_prefix_release'])
+def test_workspace_created_before_the_parent_and_document_model_still_opens_after_upgrade(tmp_path, release):
+    """Earlier releases kept document evidence under other field names and order prefixes.
+
+    Version 6 wrote work_order / shipment / rental_order fields; the short-lived WO- release wrote
+    order_number "WO-…" with parent_rental_number. Neither is rewritten, and both must still open.
+    """
+    from ocr_workspace.processing import process_page
+    dataset = tmp_path / 'demo_data'
+    manifest = demo.generate_dataset(dataset, count=1, min_pages=6, max_pages=6, rasterize=False)
+    path = tmp_path / 'workspace.sqlite'
+    store = db.Store(db.sqlite_url(path))
+    store.migrate()
+    register_pdf(store, dataset / manifest['tickets'][0]['pdf'], synthetic=True)
+    for page in store.rows(select(db.pages)):
+        assert process_page(store, page['id'], extractor=lambda *a, **k: 'W-0000001', document_driven=True)['status'] == 'success'
+    old_number = 'OD-990001' if release == 'version_6' else 'WO-990001'
+    # Put the rows back into the shape the earlier release wrote, then upgrade.
+    with store.engine.begin() as connection:
+        if release == 'version_6':
+            connection.exec_driver_sql('ALTER TABLE orders ADD COLUMN shipment_number VARCHAR(80)')
+            connection.exec_driver_sql("UPDATE orders SET shipment_number = '900001'")
+        connection.execute(db.orders.update().values(order_number=old_number))
+        connection.execute(db.rental_orders.update().values(rental_number='RO-810001'))
+        connection.execute(db.attempts.update().values(identifier=old_number))
+        for table, column in ((db.raw_rows, 'payload'), (db.page_extractions, 'fields'), (db.rental_pages, 'fields')):
+            key = list(table.primary_key.columns)[0]
+            for row in connection.execute(select(table)).mappings().all():
+                legacy = dict(row[column])
+                legacy.pop('order_number')
+                legacy.pop('parent_order_number')
+                legacy.pop('mixed_order_types')
+                legacy.pop('ocr_identifiers', None)
+                if release == 'version_6':
+                    legacy.update(work_order=old_number, shipment='900001', rental_order='RO-810001')
+                else:
+                    legacy.update(order_number=old_number, parent_rental_number='RO-810001', mixed_order_types=False,
+                                  ocr_identifiers={'work_order': old_number})
+                connection.execute(table.update().where(key == row[key.name]).values({column: legacy}))
+        if release == 'version_6':
+            connection.execute(db.versions.delete().where(db.versions.c.version == 7))
+    store.migrate()
+    assert store.counts()['orders'] == 1 and store.counts()['order_document_pages'] == 6
+    app = create_app(root=tmp_path, databases={'validation': path}, allowed_roots=[dataset])
+    with TestClient(app, raise_server_exceptions=False) as client:
+        for route in ('', '/tickets', '/parent-orders', '/activity', '/progress'):
+            assert client.get('/api/workspaces/validation' + route).status_code == 200, route
+        ticket = client.get('/api/workspaces/validation/tickets').json()['tickets'][0]
+        # The saved order is shown as it was stored: nothing is renumbered behind the user's back.
+        assert (ticket['order_number'], ticket['parent_order_number']) == (old_number, 'RO-810001')
+        assert client.get(f"/api/workspaces/validation/tickets/{ticket['id']}").status_code == 200
+        parents = client.get('/api/workspaces/validation/parent-orders').json()['parent_orders']
+        assert [(p['parent_number'], p['order_type'], p['ticket_count']) for p in parents] == [('RO-810001', 'RENTAL', 1)]
+    store.close()
