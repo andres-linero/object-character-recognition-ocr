@@ -13,7 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-  "pytest>=8", "httpx>=0.27,<1", "ruff==0.17.4", "pre-commit>=4,<5",
+  "pytest>=8", "httpx>=0.27,<1", "ruff==0.17.5", "pre-commit>=4,<5",
 ]
 
 [tool.uv]
