@@ -133,6 +133,12 @@ downloads = Table("ticket_downloads", metadata, identity(),
     Column("kind", String(20), nullable=False),
     Column("filename", Text, nullable=False),
     CheckConstraint("kind IN ('pdf','scan_zip','rental_zip','reported')"), schema="ops")
+ocr_cache = Table("ocr_result_cache", metadata,
+    Column("crop_sha256", String(64), primary_key=True),
+    Column("parser_version", Integer, nullable=False),
+    Column("kind", String(20)), Column("identifier", String(80)),
+    Column("identifiers", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False), schema="ops")
 
 
 class Store:
@@ -170,7 +176,7 @@ class Store:
                             connection.execute(CreateSchema(schema, if_not_exists=True))
                     versions.create(connection, checkfirst=True)
                     current = connection.scalar(select(func.max(versions.c.version))) or 0
-                    if current > 5:
+                    if current > 6:
                         raise ValueError("Database schema is newer than this application")
                     if current == 0:
                         metadata.create_all(connection)
@@ -210,6 +216,9 @@ class Store:
                     if current < 5:
                         downloads.create(connection, checkfirst=True)
                         connection.execute(versions.insert().values(version=5, applied_at=utcnow()))
+                    if current < 6:
+                        ocr_cache.create(connection, checkfirst=True)
+                        connection.execute(versions.insert().values(version=6, applied_at=utcnow()))
                     if sqlite and connection.exec_driver_sql('PRAGMA foreign_key_check').all():
                         raise ValueError('Migration would break existing document references')
             finally:

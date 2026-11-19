@@ -1,8 +1,12 @@
 # ADR 0001: Separate application responsibilities within one deployable app
 
-> Historical decision record. The Streamlit interfaces have since been removed; see [current architecture](../architecture.md).
+Status: Superseded on 2026-11-16 by the FastAPI workspace described in [current architecture](../architecture.md)
 
-Status: Proposed
+## Outcome
+
+The single-deployment decision held; the Streamlit application it was written for did not. The UI was replaced by a static HTML/CSS/JavaScript client served by FastAPI, and the proposed boundaries now exist as modules in one package: `web_api.py` (presentation), `processing.py` and `intake_watcher.py` (application services), `page_review.py` and `document_data.py` (matching and field rules), `ocr.py` (provider adapter) and `storage.py` (persistence). Stages 3 and 4 were delivered through the relational store in [ADR 0002](0002-relational-store-and-etl.md): page attempts are persisted as success, no-match or error, and failed pages are retried without re-reading successful ones. Stage 2 no longer applies, because the sign-in flow was removed and the workspace binds to localhost only. Stage 5 remains open: no workload measurements have been taken, and no background worker service has been added.
+
+Everything below is the original proposal of 2026-11-06, kept unchanged as a record. "The application" there means the retired Streamlit version.
 
 Date: 2026-11-06
 

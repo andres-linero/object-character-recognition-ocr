@@ -1,7 +1,7 @@
 """Validate staging and honest page-level comparisons without any provider calls."""
 import json
 
-import fitz
+import pymupdf as fitz
 import pytest
 from scripts import create_demo_data as demo
 from scripts import validate_ocr as validation

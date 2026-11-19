@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 import sys
 
-import fitz
+import pymupdf as fitz
 from sqlalchemy import select
 
 ROOT = Path(__file__).resolve().parents[1]

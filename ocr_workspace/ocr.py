@@ -4,6 +4,7 @@ Only the top-right corner of each image is sent to Azure (privacy crop).
 The crop is intended to capture order/shipment number fields.
 Verify the crop against your document layout before using private documents.
 """
+import json
 import os
 import re
 import logging
@@ -11,12 +12,10 @@ from io import BytesIO
 from dataclasses import dataclass, field
 from typing import Literal
 from typing import Optional
-try:
-    from .page_review import canonical_rental_number
-except ImportError:
-    from page_review import canonical_rental_number
 
 from PIL import Image
+
+from .page_review import canonical_rental_number
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +70,48 @@ class ParsedIdentifier:
     identifiers: dict = field(default_factory=dict, compare=False)
 
 
-def extract_order_number(image_bytes: bytes, crop_header: bool = True,
-                         crop_ratio: float = HEADER_CROP_HEIGHT) -> Optional[str]:
-    """Compatibility wrapper for the legacy scan index."""
-    result = extract_order_identity(image_bytes, crop_header, crop_ratio)
-    return result.value if result else None
+# Bump whenever identifier parsing changes: cached provider results parsed by
+# an older version are ignored, so a regex fix is never hidden by the cache.
+PARSER_VERSION = 1
+
+# Bounded provider retries. azure-core retries 408/429/5xx and transport
+# failures with exponential backoff and honours Retry-After; the explicit
+# timeouts stop one stalled page from hanging the intake worker.
+CLIENT_OPTIONS = {
+    "retry_total": 4,
+    "retry_backoff_factor": 1.0,
+    "retry_backoff_max": 30,
+    "connection_timeout": 10,
+    "read_timeout": 60,
+}
+
+_client = None
+_client_config = None
+
+
+def _get_client(endpoint: str, key: str):
+    """Reuse one provider client (and its connection pool) across pages."""
+    global _client, _client_config
+    client_cls, _, credential_cls = _get_azure_ocr_types()
+    config = (client_cls, endpoint, key)
+    if _client is None or _client_config != config:
+        _client = client_cls(endpoint=endpoint, credential=credential_cls(key), **CLIENT_OPTIONS)
+        _client_config = config
+    return _client
+
+
+def _capture_sample(raw_text: str, parsed: Optional["ParsedIdentifier"]) -> None:
+    """Opt-in local capture of header text for promoting cases into the golden corpus."""
+    target = os.getenv("OCR_CAPTURE_PATH", "").strip()
+    if not target:
+        return
+    record = {"text": re.sub(r"\s+", " ", raw_text).strip(),
+              "kind": parsed.kind if parsed else None, "value": parsed.value if parsed else None}
+    try:
+        with open(target, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+    except OSError:
+        logger.warning("OCR sample capture failed; continuing without it")
 
 
 def extract_order_identity(
@@ -99,8 +135,8 @@ def extract_order_identity(
         image_bytes = _crop_header(image_bytes, height_ratio=crop_ratio)
         logger.debug("Cropped image to top %d%% for privacy", int(crop_ratio * 100))
 
-    client_cls, request_cls, credential_cls = _get_azure_ocr_types()
-    client = client_cls(endpoint=endpoint, credential=credential_cls(key))
+    _, request_cls, _ = _get_azure_ocr_types()
+    client = _get_client(endpoint, key)
     poller = client.begin_analyze_document(
         "prebuilt-read",
         request_cls(bytes_source=image_bytes),
@@ -113,7 +149,9 @@ def extract_order_identity(
         for line in (page.lines or [])
     )
 
-    return parse_identifier(raw_text)
+    parsed = parse_identifier(raw_text)
+    _capture_sample(raw_text, parsed)
+    return parsed
 
 
 def parse_document_identifiers(raw_text: str) -> dict:

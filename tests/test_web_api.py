@@ -1,6 +1,6 @@
 """Exercise product API against real SQL and generated multi-ticket source PDFs."""
 
-import fitz
+import pymupdf as fitz
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient

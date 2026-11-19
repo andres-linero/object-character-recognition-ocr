@@ -27,7 +27,7 @@ Requires Docker with Compose, or an existing PostgreSQL instance. Docker/Postgre
 python3 scripts/ingest_data.py --tracker demo_data/orders.xlsx --source-system demo --manifest demo_data/manifest.json
 ```
 
-The CLI loads the local `.env`, applies migration version 1, stages tracker rows, normalizes and loads orders/customers, then registers synthetic expected page associations. For real documents, omit `--manifest` and use `--pdf /path/to/ticket.pdf` to register the document and pages.
+The CLI loads the local `.env`, applies pending schema migrations, stages tracker rows, normalizes and loads orders/customers, then registers synthetic expected page associations. For real documents, omit `--manifest` and use `--pdf /path/to/ticket.pdf` to register the document and pages.
 
 The database role must be allowed to create the `staging`, `core`, and `ops` schemas for initial migration. No database is silently substituted if PostgreSQL connection/setup fails.
 
@@ -41,7 +41,7 @@ The database role must be allowed to create the `staging`, `core`, and `ops` sch
 
 SQLite maps these logical schemas into one local namespace, while retaining the same table/constraint model. Primary and foreign keys enforce relationships. Uniqueness covers source checksums, source-system/order numbers, source-system/shipment numbers, document checksums, document/page pairs, and association methods. Check constraints restrict statuses and require positive page numbers/counts. SQLite foreign keys are enabled explicitly.
 
-`ocr_workspace/storage.py` defines the schema and versioned startup migrations. Migration 2 adds manual page approvals; migration 3 adds rental orders, their child tickets and identified pages, and permits multiple tickets to share a shipment. Migration 4 retains local extraction for every page independently of its match status. Migration 5 adds version-specific download receipts. Existing pages, attempts and approvals survive upgrades. The numbered SQL files in `database/` describe the PostgreSQL changes. Run `python3 scripts/export_schema.py` to export a current schema snapshot to `database/current_schema.sql`; it does not rewrite historical migrations.
+`ocr_workspace/storage.py` defines the schema and versioned startup migrations. Migration 2 adds manual page approvals; migration 3 adds rental orders, their child tickets and identified pages, and permits multiple tickets to share a shipment. Migration 4 retains local extraction for every page independently of its match status. Migration 5 adds version-specific download receipts. Migration 6 adds the OCR result cache. Existing pages, attempts and approvals survive upgrades. The numbered SQL files in `database/` describe the PostgreSQL changes. Run `python3 scripts/export_schema.py` to export a current schema snapshot to `database/current_schema.sql`; it does not rewrite historical migrations.
 
 ## ETL behavior
 
@@ -74,17 +74,19 @@ python3 scripts/process_documents.py --limit 10 --source-system tracker --retry-
 
 These commands call Azure and can incur charges. They are never invoked by the synthetic preview. Pages are cropped to the top-right half of the top quarter at 200 dpi. A geometric crop does not guarantee absence of private information; inspect layouts before using real files.
 
-Each attempt records provider, timestamps, status, extracted identifier, and a safe error category. Raw OCR text is not stored. Successful processing is linked to a uniquely matching order. Errors remain available for explicit retry, and successful pages are skipped. No-match and interrupted/running attempts require manual investigation; they are not automatically retried by this initial CLI. Changed documents fail checksum verification and must be re-registered.
+Each attempt records provider, timestamps, status, extracted identifier, and a safe error category. Raw OCR text is not stored. Successful processing is linked to a uniquely matching order. Errors remain available for explicit retry, and successful pages are skipped.
 
-The existing live dashboard also requires Microsoft Entra tenant/client/client-secret/redirect configuration as documented in `.env.example`. No credentials are needed for the separate synthetic preview.
+Provider results are cached in `ops.ocr_result_cache` by the SHA-256 of the exact header crop sent to Azure, together with the parser version that read them. An identical crop in a re-synced, renamed or appended PDF reuses the stored identifiers and its attempt is recorded with provider `ocr_result_cache`, so billable calls and cache hits can be counted per run from `ops.ocr_attempts`. Failed reads are never cached. Bump `PARSER_VERSION` in `ocr_workspace/ocr.py` whenever identifier parsing changes; older entries are then ignored.
+
+No-match and interrupted/running attempts require manual investigation; they are not automatically retried by the CLI. Changed documents fail checksum verification and must be re-registered.
 
 ## Verification and limits
 
-Tests exercise idempotency, row quarantine, relational constraints, transaction rollback, manifest provenance, OCR error/retry behavior with a mocked provider, preview filtering, synthetic-only restrictions, and the live sign-in gate. PostgreSQL tests run when `TEST_DATABASE_URL` points to a disposable test database; those tests clear the project tables. Never point it at application data.
+Tests exercise idempotency, row quarantine, relational constraints, transaction rollback, manifest provenance, OCR error/retry and result-cache behavior with a mocked provider, and synthetic-only restrictions. PostgreSQL tests run when `TEST_DATABASE_URL` points to a disposable test database; those tests clear the project tables. Never point it at application data.
 
-GitHub Actions provisions a disposable PostgreSQL 17 service and runs the same integration tests. Local checks use SQLite because the development host has no PostgreSQL/Docker installation. A successful SQLite run or compiled PostgreSQL DDL alone does not establish PostgreSQL integration success. Live Azure and Microsoft sign-in still need checks with the owner's resources.
+GitHub Actions provisions a disposable PostgreSQL 17 service and runs the same integration tests. Local checks use SQLite because the development host has no PostgreSQL/Docker installation. A successful SQLite run or compiled PostgreSQL DDL alone does not establish PostgreSQL integration success. Live Azure reads still need checks with the owner's resources.
 
-The initial migration is not a general-purpose migration framework. The legacy dashboard is not fully migrated away from JSON/pickle. A worker queue, distributed processing, production role management, backup scheduling, and retention automation are not implemented by this change.
+The initial migration is not a general-purpose migration framework. The former JSON/pickle file caches have been removed. A worker queue, distributed processing, production role management, backup scheduling, and retention automation are not implemented by this change.
 
 ## Reference documentation
 
@@ -94,7 +96,7 @@ The initial migration is not a general-purpose migration framework. The legacy d
 
 ## Verify the two new batches through Azure
 
-The dedicated validator stages copies of the two generated 60-page batches under `demo_batches/ocr_validation/incoming_scans/`, combines their tracker rows, and uses an isolated SQLite database. The original PDF packets and the full-demo database are preserved. It does not require Entra sign-in or a PostgreSQL server.
+The dedicated validator stages copies of the two generated 60-page batches under `demo_batches/ocr_validation/incoming_scans/`, combines their tracker rows, and uses an isolated SQLite database. The original PDF packets and the full-demo database are preserved. It does not require a PostgreSQL server. The batches come from `scripts/create_demo_data.py`; generate them first, because `demo_batches/` is not kept in Git.
 
 ```sh
 python3 scripts/validate_ocr.py --prepare-only
@@ -107,4 +109,4 @@ Configure the Azure endpoint/key in local `.env`. The first provider result must
 
 The validator compares every returned identifier against page-specific manifest ground truth, including a wrong identifier that happens to match a different valid order. JSON and CSV reports record passed, mismatch, error, and pending counts, plus expected/actual identifiers. Credentials, endpoints, and raw OCR text are excluded. Reports remain local in `demo_runtime/ocr_validation_report.json` and `.csv`.
 
-At http://127.0.0.1:8502, select **Azure OCR validation — new batches** and click **Refresh results** to see current attempts, verified associations, and validation progress. The viewer does not initiate Azure calls. The new-batch database contains 20 distinct tickets and 120 pages; it is separate from the full 120-ticket/1,050-page fixture set.
+Inspect a run through the local JSON/CSV report or the isolated `demo_runtime/ocr_validation.sqlite` database; the validator always calls the provider and bypasses the result cache. The validation database contains 20 distinct tickets and 120 pages and is separate from the browser workspace at http://127.0.0.1:8700. The latest recorded run is in [validation results](ocr-validation-results.md).

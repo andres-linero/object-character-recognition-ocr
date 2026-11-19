@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import ocr
+from ocr_workspace import ocr
 
 
 class _FakePoller:
@@ -36,19 +36,19 @@ def _ocr_env(monkeypatch):
 
 def test_extracts_shipment_number_from_labeled_field():
     _FakeClient.response_text = "Delivery Ticket Shipment No. 003501 Customer 22"
-    result = ocr.extract_order_number(b"unused", crop_header=False)
-    assert result == "3501"
+    result = ocr.extract_order_identity(b"unused", crop_header=False)
+    assert result.value == "3501"
 
 
 def test_extracts_work_order_number():
     _FakeClient.response_text = "Delivery Ticket Work Order No. W-108624"
-    result = ocr.extract_order_number(b"unused", crop_header=False)
-    assert result == "W-108624"
+    result = ocr.extract_order_identity(b"unused", crop_header=False)
+    assert result.value == "W-108624"
 
 
 def test_rejects_non_ticket_text():
     _FakeClient.response_text = "Random cover sheet with customer notes only"
-    result = ocr.extract_order_number(b"unused", crop_header=False)
+    result = ocr.extract_order_identity(b"unused", crop_header=False)
     assert result is None
 
 
@@ -58,7 +58,7 @@ def test_header_noise_does_not_get_matched_as_order_number(monkeypatch):
         "Delivery Ticket 100 Example Street Example City 12345 "
         "Office: 555-0100 example.test"
     )
-    result = ocr.extract_order_number(b"unused", crop_header=False)
+    result = ocr.extract_order_identity(b"unused", crop_header=False)
     assert result is None
 
 
@@ -66,7 +66,7 @@ def test_missing_credentials_raises(monkeypatch):
     monkeypatch.delenv("AZURE_DOC_INTEL_ENDPOINT", raising=False)
     monkeypatch.delenv("AZURE_DOC_INTEL_KEY", raising=False)
     with pytest.raises(RuntimeError):
-        ocr.extract_order_number(b"unused", crop_header=False)
+        ocr.extract_order_identity(b"unused", crop_header=False)
 
 
 def test_single_response_keeps_order_ticket_and_shipment_in_separate_namespaces():
@@ -88,3 +88,29 @@ def test_golden_identifiers_keep_namespace_and_reject_noise(case):
     result = ocr.parse_identifier(case["text"])
     assert (result.kind if result else None) == case["kind"]
     assert (result.value if result else None) == case["value"]
+
+
+def test_provider_client_is_reused_with_bounded_retries(monkeypatch):
+    created = []
+
+    class _CountingClient(_FakeClient):
+        def __init__(self, *args, **kwargs):
+            created.append(kwargs)
+
+    monkeypatch.setattr(ocr, "DocumentIntelligenceClient", _CountingClient)
+    _FakeClient.response_text = "Delivery Ticket Shipment No. 003501"
+    for _ in range(3):
+        assert ocr.extract_order_identity(b"unused", crop_header=False).value == "3501"
+    assert len(created) == 1
+    assert created[0]["retry_total"] == 4 and created[0]["read_timeout"] == 60
+
+
+def test_sample_capture_is_opt_in_and_appends_reviewable_records(tmp_path, monkeypatch):
+    target = tmp_path / "samples.jsonl"
+    _FakeClient.response_text = "Delivery Ticket Shipment\nNo. 003501"
+    ocr.extract_order_identity(b"unused", crop_header=False)
+    assert not target.exists()
+    monkeypatch.setenv("OCR_CAPTURE_PATH", str(target))
+    ocr.extract_order_identity(b"unused", crop_header=False)
+    assert json.loads(target.read_text()) == {
+        "text": "Delivery Ticket Shipment No. 003501", "kind": "shipment", "value": "3501"}

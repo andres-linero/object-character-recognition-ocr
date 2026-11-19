@@ -1,15 +1,38 @@
 """Database-backed page registration, OCR attempts and explicit retry behavior."""
+import hashlib
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 from sqlalchemy import select
 
-try:
-    from . import storage as db
-    from .etl import checksum, upsert
-except ImportError:
-    import storage as db
-    from etl import checksum, upsert
+from . import storage as db
+from .etl import checksum, upsert
+
+PROVIDER = "azure_document_intelligence"
+CACHE_PROVIDER = "ocr_result_cache"
+
+
+def _cached_identity(store, crop_hash):
+    """Return (hit, parsed) for a header crop already read by the current parser version."""
+    from .ocr import PARSER_VERSION, ParsedIdentifier
+    with store.engine.connect() as connection:
+        row = connection.execute(select(db.ocr_cache).where(
+            db.ocr_cache.c.crop_sha256 == crop_hash)).mappings().first()
+    if row is None or row["parser_version"] != PARSER_VERSION:
+        return False, None
+    if not row["identifier"]:
+        return True, None
+    return True, ParsedIdentifier(row["kind"], row["identifier"], dict(row["identifiers"] or {}))
+
+
+def _remember_identity(store, crop_hash, parsed):
+    """Store only completed provider reads; errors are never cached and stay retryable."""
+    from .ocr import PARSER_VERSION
+    with store.engine.begin() as connection:
+        upsert(connection, db.ocr_cache, ["crop_sha256"], {
+            "crop_sha256": crop_hash, "parser_version": PARSER_VERSION,
+            "kind": parsed.kind if parsed else None, "identifier": parsed.value if parsed else None,
+            "identifiers": dict(parsed.identifiers) if parsed else {}, "created_at": db.utcnow()})
 
 
 def register_pdf(store, path, synthetic=False):
@@ -27,9 +50,16 @@ def register_pdf(store, path, synthetic=False):
     return document_id
 
 
-def process_page(store, page_id, source_system="tracker", extractor=None, on_stage=None, document_driven=False):
-    """Commit an attempt before calling the provider; retain failures for explicit retry."""
+def process_page(store, page_id, source_system="tracker", extractor=None, on_stage=None, document_driven=False,
+                 use_cache=True):
+    """Commit an attempt before calling the provider; retain failures for explicit retry.
+
+    The default provider is billed per page, so its result is cached by the
+    SHA-256 of the exact header crop it would receive. Injected extractors
+    (tests, alternate providers) always run and never read or write the cache.
+    """
     from .ocr import ParsedIdentifier, extract_order_identity
+    use_cache = use_cache and extractor is None
     if extractor is None:
         extractor = extract_order_identity
     with store.engine.connect() as connection:
@@ -38,8 +68,9 @@ def process_page(store, page_id, source_system="tracker", extractor=None, on_sta
     attempt_id = db.uid()
     with store.engine.begin() as connection:
         connection.execute(db.attempts.insert().values(id=attempt_id, page_id=page_id,
-            provider="azure_document_intelligence", started_at=db.utcnow(), status="running"))
+            provider=PROVIDER, started_at=db.utcnow(), status="running"))
     identifier = error = None
+    cached = False
     try:
         path = Path(page["path"])
         if checksum(path) != page["sha256"]:
@@ -54,11 +85,24 @@ def process_page(store, page_id, source_system="tracker", extractor=None, on_sta
             rect = source.rect
             crop = fitz.Rect(rect.width / 2, 0, rect.width, rect.height / 4)
             image = source.get_pixmap(dpi=200, clip=crop).tobytes("png")
-        parsed = extractor(image, crop_header=False)
+        crop_hash = hashlib.sha256(image).hexdigest()
+        if use_cache:
+            cached, parsed = _cached_identity(store, crop_hash)
+        if not cached:
+            parsed = extractor(image, crop_header=False)
+            if use_cache and (parsed is None or isinstance(parsed, ParsedIdentifier)):
+                _remember_identity(store, crop_hash, parsed)
         if on_stage:
             on_stage("matching")
         if isinstance(parsed, ParsedIdentifier):
             identifier, kind = parsed.value, parsed.kind
+            if not document_driven and kind in {"rental_order", "customer_order"}:
+                # Tracker rows are keyed by shipment or work order. A header that also
+                # prints its parent rental or customer order must still match its row.
+                for tracked in ("shipment", "work_order"):
+                    if parsed.identifiers.get(tracked):
+                        identifier, kind = parsed.identifiers[tracked], tracked
+                        break
         else:
             # Compatibility callbacks return W- work orders or numeric shipments.
             identifier = str(parsed).strip() if parsed is not None else None
@@ -113,14 +157,16 @@ def process_page(store, page_id, source_system="tracker", extractor=None, on_sta
                 status = "no_match"
                 error = error or ("unknown_or_ambiguous_order" if identifier else "identifier_not_found")
             connection.execute(db.attempts.update().where(db.attempts.c.id == attempt_id).values(
-                status=status, identifier=identifier, error_code=error, finished_at=db.utcnow()))
+                status=status, identifier=identifier, error_code=error, finished_at=db.utcnow(),
+                provider=CACHE_PROVIDER if cached else PROVIDER))
     except Exception as exc:
         http_status = getattr(exc, "status_code", None)
         status, error = "error", f"HTTP{http_status}" if isinstance(http_status, int) else type(exc).__name__
         with store.engine.begin() as connection:
             connection.execute(db.attempts.update().where(db.attempts.c.id == attempt_id).values(
                 status=status, error_code=error, finished_at=db.utcnow()))
-    return {"attempt_id": attempt_id, "status": status, "identifier": identifier, "error_code": error}
+    return {"attempt_id": attempt_id, "status": status, "identifier": identifier, "error_code": error,
+            "cached": cached}
 
 
 def process_batch(store, limit=10, retry_errors=False, source_system="tracker", extractor=None):

@@ -11,6 +11,8 @@ Run from the repository root. Copy `.env.example` to `.env` if no local file exi
 | `OCR_HEADER_NOISE` | Optional form-specific text exclusions, separated by `|` |
 | `OCR_EXCLUDED_NUMBERS` | Optional comma-separated numeric exclusions |
 | `OCR_ALLOW_UNLABELED_FALLBACK` | Legacy ambiguous-number fallback; off by default |
+| `OCR_MAX_PAGES_PER_FILE` | Optional cost guard: stop a scan after this many billable OCR pages; `0` or unset means no limit |
+| `OCR_CAPTURE_PATH` | Optional, development only: local JSONL file that receives OCR header text and its parsed result for promotion into the golden corpus. Leave unset in normal use |
 
 The intake worker reads the two Azure credentials from `.env`, falling back to environment values. The app uses `demo_runtime/workspace.sqlite` and managed PDFs in `Scans/`. It serves the browser UI on http://127.0.0.1:8700.
 
@@ -22,8 +24,6 @@ Streamlit, Microsoft Entra sign-in and Key Vault configuration belonged to the r
 | --- | --- |
 | `DATABASE_URL` | Relational store used by ingestion CLI tools |
 | `POSTGRES_PASSWORD` | Password required by the optional Compose PostgreSQL service |
-| `EXCEL_PATH` | Workbook path used by legacy workbook utilities |
-| `SCAN_PDF_PATH` | Scan directory override used by legacy indexing utilities |
 
 Workbook imports and older demo preparation are separate from browser uploads. The current tracker derives orders from uploaded documents. See [the data-pipeline guide](data-pipeline.md) for CLI ingestion.
 
@@ -36,8 +36,7 @@ Workbook imports and older demo preparation are separate from browser uploads. T
 | `Scans/flag_order/` | Scans and reports needing attention |
 | `Scans/output/` | Compiled PDFs |
 | `Scans/manifest.json` | Synthetic sample allowlist and expected cases |
-| `demo_runtime/workspace.sqlite` | Orders, pages, attempts, approvals and download receipts |
+| `demo_runtime/workspace.sqlite` | Orders, pages, attempts, cached OCR results, approvals and download receipts |
 | `demo_runtime/read-scan` | Compiled local extraction helper |
-| `ocr_workspace/cache/` | Separate legacy workbook/index caches, if generated |
 
 Generated data and runtime files are excluded from Git. Back up the database and its referenced files together. See [operations](operations.md) for recovery guidance.

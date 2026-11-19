@@ -2,12 +2,12 @@
 import csv
 import json
 
-import fitz
+import pymupdf as fitz
 from openpyxl import load_workbook
+import pandas as pd
 import pytest
 
 from scripts import create_demo_data as demo
-import data_loader
 
 
 def test_seed_reproduces_business_records_and_complete_copy_sets():
@@ -58,7 +58,7 @@ def test_default_scan_pages_are_image_only(tmp_path):
             assert image[2:4] == (1020, 1320)
 
 
-def test_dataset_matches_manifest_csv_and_real_workbook_loader(tmp_path, monkeypatch):
+def test_dataset_matches_manifest_csv_and_workbook(tmp_path):
     target = tmp_path / "dataset"
     result = demo.generate_dataset(target, count=5, seed=8, rasterize=False)
     assert json.loads((target / "manifest.json").read_text()) == result
@@ -72,13 +72,10 @@ def test_dataset_matches_manifest_csv_and_real_workbook_loader(tmp_path, monkeyp
     for sheet in wb:
         assert [c.value for c in next(sheet.iter_rows())] == list(demo.TRACKER_COLUMNS)
     wb.close()
-    monkeypatch.setenv("EXCEL_PATH", str(target / "orders.xlsx"))
-    monkeypatch.setattr(data_loader, "CACHE_DIR", tmp_path / "cache")
-    monkeypatch.setattr(data_loader, "EXCEL_CACHE_FILE", tmp_path / "cache" / "excel.pkl")
-    loader = data_loader.DataLoader()
-    assert len(loader.excel_df) == 5
+    workbook_rows = {str(row["SO"]): row for row in pd.concat(pd.read_excel(target / "orders.xlsx", sheet_name=None, dtype=str).values()).to_dict("records")}
+    assert len(workbook_rows) == 5
     for record in result["tickets"]:
-        row = loader.get_order_by_id(record["shipment"])
+        row = workbook_rows[record["shipment"]]
         assert row["Order_ID"] == record["order_id"]
         assert row["Customer_name"] == record["customer"]
         pdf_path = target / record["pdf"]

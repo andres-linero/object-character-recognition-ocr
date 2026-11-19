@@ -4,7 +4,7 @@ import json
 import time
 import zipfile
 
-import fitz
+import pymupdf as fitz
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select

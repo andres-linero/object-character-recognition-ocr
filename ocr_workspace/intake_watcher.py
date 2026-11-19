@@ -8,7 +8,7 @@ import errno
 import threading
 from copy import deepcopy
 
-import fitz
+import pymupdf as fitz
 
 from sqlalchemy import select
 from . import storage as db
@@ -152,10 +152,14 @@ class IntakeWatcher:
                 if checksum(archive) != digest:
                     raise ValueError('Archived source checksum changed')
                 document_id = register_pdf(self.store, archive, synthetic=True)
-                attempted = {r['page_id'] for r in self.store.rows(select(db.attempts.c.page_id))}
                 pages = self.store.rows(select(db.pages).where(db.pages.c.document_id == document_id)
                                         .order_by(db.pages.c.page_number))
                 statuses = {row['page_id']: row['status'] for row in self.store.rows(select(db.attempts).order_by(db.attempts.c.started_at))}
+                # A page whose latest attempt errored (provider or transport failure) is
+                # read again when its PDF is next submitted; finished pages never are.
+                attempted = {page_id for page_id, status in statuses.items() if status != 'error'}
+                limit = int(os.getenv('OCR_MAX_PAGES_PER_FILE', '0') or 0)
+                provider_calls = cache_hits = 0
                 def report(phase):
                     completed = sum(statuses.get(p['id']) in {'success', 'no_match', 'error'} for p in pages)
                     matched = sum(statuses.get(p['id']) == 'success' for p in pages)
@@ -167,14 +171,19 @@ class IntakeWatcher:
                         return
                     if page['id'] in attempted:
                         continue
+                    if limit and provider_calls >= limit:
+                        raise RuntimeError('OCR page limit reached')
                     report('reading')
                     result = process_page(self.store, page['id'], 'demo', self.extractor,
                                           on_stage=lambda phase: report(phase), document_driven=self.root is not None)
                     statuses[page['id']] = result['status']
+                    cache_hits += bool(result.get('cached'))
+                    provider_calls += not result.get('cached')
                     report('matching')
                     LOG.info('Intake OCR page %s: %s', page['page_number'], result['status'])
                     if result.get('error_code') in {'HTTP401', 'HTTP403', 'HTTP404'}:
                         raise RuntimeError('Provider configuration rejected')
+                LOG.info('Intake OCR finished: %s provider calls, %s cached results', provider_calls, cache_hits)
                 if self.root is not None:
                     report('preparing_pdf')
                     tickets = prepare_ticket_pdfs(self.store, document_id, self.folder.parent / 'output', allow_partial=True)

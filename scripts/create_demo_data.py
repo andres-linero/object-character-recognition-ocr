@@ -19,7 +19,7 @@ import shutil
 import tempfile
 from typing import Sequence
 
-import fitz
+import pymupdf as fitz
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
@@ -399,8 +399,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(exc))
     print(f"Created {result['count']} synthetic tickets / {result['total_pages']} pages in {args.output.absolute()}")
     print("Each ticket has colored copies of three papers; no real data or reference PDF content was copied.")
-    print(f"EXCEL_PATH={args.output.absolute() / 'orders.xlsx'}")
-    print(f"SCAN_PDF_PATH={args.output.absolute() / 'incoming_scans'}")
+    print(f"Tracker: {args.output.absolute() / 'orders.xlsx'}")
+    print(f"Scans: {args.output.absolute() / 'incoming_scans'}")
     return 0
 
 

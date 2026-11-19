@@ -13,8 +13,8 @@ Start with the [project README](../README.md) to install and launch the app.
 | [Synthetic demo dataset](demo-data.md) | Generate 100 fictional packets and a matching tracker |
 | [Configuration and data](configuration.md) | Environment variables, workbook schema, and generated files |
 | [Operations](operations.md) | Startup, diagnosis, recovery, and retention |
-| [ADR 0001](decisions/0001-modular-monolith.md) | Proposed architecture direction and implementation stages |
-| [ADR 0002](decisions/0002-relational-store-and-etl.md) | Proposed database, ETL, and resume evidence |
+| [ADR 0001](decisions/0001-modular-monolith.md) | Superseded single-app proposal for the retired Streamlit version, with its outcome |
+| [ADR 0002](decisions/0002-relational-store-and-etl.md) | Relational store and ETL decision, with what was implemented |
 | [Walkthrough plan](walkthroughs.md) | Video coverage, transcripts, and publication requirements |
 | [Current audit](audit-hardening.md) | Findings, regression fixes, CI checks, and remaining work |
 | [Repository preparation](repository-preparation.md) | Initial public-copy changes and validation limits |

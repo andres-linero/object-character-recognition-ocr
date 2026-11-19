@@ -1,41 +1,38 @@
-# Audit hardening — 2026-11-07
+# Audit hardening
+
+Last updated 2026-11-16.
 
 ## Scope and evidence
 
-This audit applies to `andres-linero/object-character-recognition-ocr`, branch `fix/audit-hardening`. The supplied issues #18–#33 belong to the office `Gen_AI` repository and are reference findings, not issues closed by this change. That repository, its history, and its settings were not modified. UI redesign is deferred at the owner's request.
+This audit covers this repository's current product: the localhost FastAPI workspace in `ocr_workspace/`, its ingestion CLI, the static client in `web/`, and CI. Issue numbers below are this repository's own issues.
 
-The new repository has independent history. A local Gitleaks 8.30.1 scan of all local refs found no secrets; historical tracked paths contain no PDF, XLSX, XLS, `.env`, or Streamlit secret files. This does not certify all text/media as free of private information or establish publication rights. Do not import the office repository's history. No history rewrite is needed for this copy based on these checks.
+The repository has independent history. The CI secret scan (Gitleaks 8.30.1) covers all fetched history on every push and pull request. Tracked paths contain no PDF, XLSX, XLS or `.env` files. This does not certify all text and media as free of private information or establish publication rights.
 
-Before CI: 71 Python tests passed locally on macOS/Python 3.13, with eight skips (seven PostgreSQL variants and one real Win32 API test); four frontend DOM tests passed. Ruff's configured correctness rules passed. Cloud OCR was mocked; no paid Azure calls were made during this audit. Existing live synthetic validation results predate these parser changes. Remote CI results are authoritative for Linux/PostgreSQL and Windows and must be green before merging.
+Verification on 2026-11-16, macOS, Python 3.12: 128 Python tests passed with nine skips (PostgreSQL variants, which need `TEST_DATABASE_URL`); 29 frontend tests passed; Ruff's configured correctness rules passed. Cloud OCR is mocked in the test suite; the separate live validation is described below. The bounded-retry options were checked against the installed Azure SDK client without network access. Remote CI is authoritative for Linux/PostgreSQL and Windows and must be green before merging.
 
-## Original audit mapping
+## Issue status
 
-| Reference | Status in this copy |
+| Issue | Status |
 | --- | --- |
-| #18 CI | Ubuntu/PostgreSQL, Windows, frontend, correctness lint, and history secret scan run on PRs. No production CD target exists. |
-| #19 Ruff/pre-commit | Ruff is pinned, with syntax/import/undefined-name/unused-code rules. Hooks check Ruff, TOML, YAML, and conflict markers. Broader style modernization is deferred. |
-| #20 project metadata | `pyproject.toml` defines Python support, dependencies, development group, pytest and Ruff settings. |
-| #21 lock and updates | `uv.lock` locks Python resolution; npm already has a lock. CI uses frozen installs. Dependabot covers uv, npm, and Actions. Python dependency declarations are centralized in `pyproject.toml`; the former requirements files have been removed. |
-| #22 secrets | `.env.example` documents names without credentials. Gitleaks scans fetched history with redacted output. Actual `.env` remains ignored and local. |
-| #23 inherited customer files | Original history was never imported. No listed data/secret filenames were found in this copy's history. Office history exposure remains a separate task. |
-| #24 synchronous/concurrent OCR | Open. The primary synthetic UI does not start cloud indexing on reruns. CLI attempts/retries are persisted, but atomic job claiming, worker leasing, and multi-process duplicate-call protection are still needed. The legacy Streamlit interfaces have since been removed; the current local intake worker uses a process lock. |
-| #25 golden corpus | Added 18 text cases covering label variants, typed identifiers, postal/year/customer noise, fragments, and overlong IDs. No Azure needed. |
-| #26 application tests | Existing legacy preview/SSO-gate tests and API/DOM tests pass. Authenticated tenant callback coverage is still missing. |
-| #27 quoted Excel reload | Fixed shared path normalization and full path/size/nanosecond-time signature comparison. Regression test added. |
-| #28 wrong compiled PDF | Replaced substring globbing with exact normalized leading filename tokens and traversal protection. Shipment 1001 cannot select W-11001 or 10010. |
-| #29 stale Excel cache | Added cache schema version and rejected old payloads. Pickle remains trusted-local-only. |
-| #30 OAuth redirect state | Open/unverified. No tenant credentials were used for integration tests; legacy SSO remains mandatory. Do not treat the synthetic localhost workspace as production authentication. |
-| #31 ID cross-matching | New parser retains shipment/work-order type; SQL matches one corresponding column. Legacy index no longer aliases bare numbers to W-prefixed IDs. A two-order numeric collision regression runs on SQLite and PostgreSQL. Unlabeled numeric fallback is now opt-in. |
-| #32 dead code/logging | Removed correctness-lint findings; broader dead-method removal, structured logging, and legacy decomposition remain open. |
-| #33 documentation | README now describes locks and actual CI. Updated stale empty-state guidance. This report supersedes initial validation/dependency status in `repository-preparation.md`. Other legacy architecture cleanup remains incremental. |
-| Original #6 filename | Sanitized Windows-illegal filename characters; regression coverage added. |
+| #16 dependency lock and updates | Done. `uv.lock` locks Python resolution and CI installs with `--locked`; npm has its own lock. Dependabot covers uv, npm and Actions weekly, with minor/patch updates grouped. `.python-version` pins local runs to 3.12, matching CI. Dependabot security alerts are a repository setting and must be enabled by the owner. |
+| #17 secret scanning | Done. Gitleaks scans full history in CI and runs as a pre-commit hook. `.env.example` documents variable names without credentials; `.env` stays ignored. The Key Vault integration and its URL were removed with the old sign-in flow. |
+| #20 OCR golden corpus | Done. `tests/fixtures/ocr_golden.json` holds 18 text-only cases (label variants, typed identifiers, postal/year/customer-code noise, short fragments, overlong IDs) and gates every parser change in CI. Setting `OCR_CAPTURE_PATH` appends header text and its parsed result to a local file for review and promotion into the corpus; it is off by default. |
+| #24 unversioned Excel pickle cache | Closed by removal. The workbook loader, the JSON scan index and both file caches were deleted; no pickle is read or written. The replacement OCR result cache stores a parser version with every entry. |
+| #27 dead code and stale text | Done. Removed the unused workbook loader, scan index, filename utilities, their tests, four unreferenced sample scripts, the dead test stubs for Pillow and Azure, and the duplicate import fallbacks. Imports use `pymupdf` directly. The remaining `print()` calls are command-line output in `scripts/`. |
+| #29 transient OCR failures dropping pages | Done. Every page attempt is committed before the provider call and ends as `success`, `no_match` or `error`; errored pages are flagged for review, never silently skipped. One provider client is reused per process with four bounded retries (exponential backoff, `Retry-After` honoured) and explicit connection/read timeouts. A page whose latest attempt errored is read again when its PDF is next submitted. |
+| #30 OCR results re-billed on re-sync | Done. Results are cached by the SHA-256 of the exact header crop sent to Azure, so re-synced, renamed or appended PDFs do not pay again for pages already read. Cache hits are recorded as attempts with provider `ocr_result_cache`, which makes billable calls countable per run. Failed reads are never cached. `OCR_MAX_PAGES_PER_FILE` optionally stops a scan after a set number of billable pages. |
 
-Do not close or rewrite original issues #2/#12 from this branch. Their applicability belongs to the office architecture review.
+## Behavior notes
 
-## Behavior changes and remaining priorities
+Shipment labels take priority over unrelated work-order text; numeric `Order No` values remain work orders. `OCR_ALLOW_UNLABELED_FALLBACK=0` is the safe default; enabling it restores heuristic numeric extraction and may increase false matches. Review no-match pages rather than inferring an association from a postcode.
 
-Typed OCR extraction is used by the SQL processor; the legacy string-returning wrapper remains compatible. Shipment labels take priority over unrelated work-order text. Numeric `Order No` values remain work orders. `OCR_ALLOW_UNLABELED_FALLBACK=0` is the safe default; enabling it restores heuristic numeric extraction and may increase false matches. Review no-match pages rather than inferring an association from a postcode.
+The result cache applies only to the built-in Azure provider. Bump `PARSER_VERSION` in `ocr_workspace/ocr.py` whenever identifier parsing changes so stored results from the older parser are ignored. `scripts/validate_ocr.py` always calls the provider, because its purpose is to validate live reads.
 
-Next: implement atomic OCR job claiming and recovery; verify Entra login/redirect behavior in a real tenant; then address the deferred navigation/table redesign and legacy logging/decomposition. Publication still requires rights/license review and deliberate data/media review. Branch protection and repository access settings were not changed by this PR.
+## Remaining priorities
 
-Dependabot's uv configuration follows the [official uv integration guide](https://docs.astral.sh/uv/guides/integration/dependabot/). CI checks do not deploy the app. Install local hooks with `uv run --locked pre-commit install`; refresh hook environments after relocating the project.
+- The intake worker is guarded by a single process lock. Atomic job claiming, worker leasing and duplicate-call protection across several processes are not implemented.
+- The workspace is a localhost synthetic demonstration with no authentication; do not expose it on a network.
+- Live Azure validation was repeated on the current code on 2026-11-16: 120 of 120 synthetic pages matched, after fixing a tracker-matching bug the rerun exposed. See [validation results](ocr-validation-results.md) for scope and limits.
+- Publication still requires rights/license review and a deliberate data/media review. Branch protection and repository access settings are the owner's to configure.
+
+Dependabot's uv configuration follows the [official uv integration guide](https://docs.astral.sh/uv/guides/integration/dependabot/). CI checks do not deploy the app. Install local hooks with `uv run --locked pre-commit install`.

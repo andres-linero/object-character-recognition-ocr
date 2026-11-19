@@ -137,7 +137,7 @@ def main():
             if needs_attempt and attempted >= args.limit:
                 break
             if needs_attempt:
-                result = process_page(store, item["page_id"], source_system="demo")
+                result = process_page(store, item["page_id"], source_system="demo", use_cache=False)
                 results[item["page_id"]] = result
                 attempted += 1
                 report = write_report(todo, results)

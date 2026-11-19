@@ -20,7 +20,7 @@ Created Object Character Recognition (OCR) from the tracked source snapshot of t
 
 - Private .env and customer workbooks existed outside tracked source and were deliberately excluded; their contents were not inspected or published.
 - Reviewed the copied tracked text for original branding, employee references, company contacts, local paths, and obvious credential assignments. This is a source review, not a formal security certification or exhaustive secret scanner run.
-- Existing Excel cache uses pickle and must be treated as trusted local state.
+- Existing Excel cache uses pickle and must be treated as trusted local state. (Since removed with the workbook loader.)
 - All authenticated users share one permission level. Live Entra callback/session behavior and Azure access require integration testing before shared deployment.
 - The OCR crop depends on document geometry and the utility permits uncropped calls. Inspect layouts before processing confidential material.
 - Dependencies retain original minimum version constraints. A clean-install reproduction, exact version lock, vulnerability scan, and dependency license inventory remain outstanding.

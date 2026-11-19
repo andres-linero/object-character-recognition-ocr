@@ -1,8 +1,14 @@
 # ADR 0002: Use PostgreSQL for application data and retain Excel at the boundary
 
-> Historical decision record. The Streamlit interfaces have since been removed; see [current architecture](../architecture.md).
+Status: Accepted and implemented, with one change: the browser workspace runs on SQLite
 
-Status: Accepted direction; initial implementation on feature branch
+## Outcome
+
+Updated 2026-11-16. The relational model, versioned migrations, tracker ETL, document/page registration and page-level OCR attempts described here are implemented in `ocr_workspace/storage.py`, `etl.py` and `processing.py`, and merged to `main`. The schema has since grown to six migrations (manual page approvals, rental-order hierarchy, page extractions, download receipts and an OCR result cache). The JSON/pickle file state this record set out to replace has been removed.
+
+Two things turned out differently from the proposal. The current FastAPI workspace uses SQLite (`demo_runtime/workspace.sqlite`) as its store, because it is a single-user localhost application; PostgreSQL is supported by the same model for the ingestion CLI and is exercised in CI. And the presentation layer is no longer a Streamlit dashboard but a static web client served by FastAPI. See [current architecture](../architecture.md) and [the data-pipeline guide](../data-pipeline.md).
+
+Everything below is the original record of 2026-11-06, kept unchanged apart from the diagram label. "The current application" there means the retired Streamlit version, and the "Initial implementation status" and "Resume evidence" sections describe that date.
 
 Date: 2026-11-06
 
@@ -72,7 +78,7 @@ flowchart LR
     OCR --> Match[Validate identifiers and associate pages]
     Match --> Core
     Core --> Views[SQL reconciliation and reporting views]
-    Views --> UI[Streamlit dashboard]
+    Views --> UI[Web workspace]
 ```
 
 Extraction preserves source file, sheet, row, and run identity. Transformations normalize column aliases, preserve identifier strings, parse dates, validate required fields, and report invalid rows. Loading uses transactions and stable unique keys so repeating a source does not duplicate records. Define whether a rejected row fails an entire file or allows a partial load; expose that choice in the run outcome.

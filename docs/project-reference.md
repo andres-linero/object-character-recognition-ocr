@@ -112,7 +112,7 @@ Initialization migrates existing storage without clearing it. Sample refresh bac
 
 ## Validation
 
-The latest local run passed **137 Python tests** and **29 frontend tests**, with **8 Python tests skipped**. Tests cover upload boundaries, page matching, review conflicts, PDF readiness, download marks and reset protection. Azure responses are mocked. Optional PostgreSQL integration tests require a disposable `TEST_DATABASE_URL`.
+The latest local run passed **128 Python tests** and **29 frontend tests**, with **9 Python tests skipped**. Tests cover upload boundaries, page matching, review conflicts, PDF readiness, download marks and reset protection. Azure responses are mocked. Optional PostgreSQL integration tests require a disposable `TEST_DATABASE_URL`.
 
 Run the checks from a feature branch:
 

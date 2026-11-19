@@ -13,7 +13,7 @@ import re
 import hashlib
 from urllib.parse import unquote
 
-import fitz
+import pymupdf as fitz
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles

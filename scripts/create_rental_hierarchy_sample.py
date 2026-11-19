@@ -9,7 +9,7 @@ import tempfile
 import sys
 import shutil
 
-import fitz
+import pymupdf as fitz
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.create_demo_data import build_tickets, write_ticket_pdf
