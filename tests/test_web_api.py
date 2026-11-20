@@ -535,3 +535,25 @@ def test_workspace_created_before_the_parent_and_document_model_still_opens_afte
         parents = client.get('/api/workspaces/validation/parent-orders').json()['parent_orders']
         assert [(p['parent_number'], p['order_type'], p['ticket_count']) for p in parents] == [('RO-810001', 'RENTAL', 1)]
     store.close()
+
+
+def test_analytics_endpoint_reads_explicit_ledger_once_per_invoice(api_workspace):
+    client, store, dataset = api_workspace
+    rows = client.get('/api/workspaces/validation/tickets').json()['tickets']
+    path = dataset.parent / 'rental_billing.csv'
+    with path.open('w', newline='') as source:
+        writer = csv.writer(source)
+        writer.writerow(['invoice_id','rental_order','invoice_date','currency','billed_cents','collected_cents','synthetic'])
+        writer.writerow(['DEMO-1', rows[0]['parent_order_number'], '2026-11-01','USD',10001,5000,'true'])
+    response = client.get('/api/workspaces/validation/analytics')
+    assert response.status_code == 200
+    data = response.json()
+    assert data['totals']['billed_cents'] == 10001
+    assert data['totals']['outstanding_cents'] == 5001
+    assert data['synthetic'] is True
+    assert len(data['rows']) == 1
+    assert data['rows'][0]['work_orders'] == 2
+    assert client.get('/api/workspaces/validation/analytics?month=2026-10').json()['rows'] == []
+    path.write_text('invoice_id\ninvalid\n')
+    assert client.get('/api/workspaces/validation/analytics').status_code == 422
+    assert client.get('/api/workspaces/missing/analytics').status_code == 404

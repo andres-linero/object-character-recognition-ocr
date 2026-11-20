@@ -286,6 +286,7 @@ function ticketDownloadControl(
 const navItems = [
   ["overview", "Overview", "grid"],
   ["tickets", "Dataset", "orders"],
+  ["analytics", "Rental analytics", "grid"],
   ["ocr", "OCR activity", "scan"],
   ["flags", "Flags", "eye"],
   ["imports", "Ingestion history", "clock"],
@@ -1543,6 +1544,9 @@ async function loadView() {
         state.scanCounts = data;
         activity(data.activity);
       }
+    } else if (state.view === "analytics") {
+      const data = await api(`${base()}/analytics`);
+      if (generation === state.request) analyticsView(data);
     } else if (state.view === "imports") {
       const data = await api(`${base()}/imports`);
       if (generation === state.request) imports(data.imports);
@@ -3494,3 +3498,213 @@ async function boot() {
   }
 }
 boot();
+
+function analyticsView(data) {
+  const money = (cents) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(cents / 100);
+  let visible = data.rows;
+  const customer = el("input", {
+    type: "search",
+    placeholder: "Search customer or rental…",
+    "aria-label": "Search analytics",
+  });
+  const month = el("input", { type: "month", "aria-label": "Invoice month" });
+  const content = el("div");
+  const render = () => {
+    visible = data.rows.filter(
+      (r) =>
+        (!month.value || r.invoice_date.startsWith(month.value)) &&
+        `${r.customer} ${r.rental_order}`
+          .toLowerCase()
+          .includes(customer.value.toLowerCase()),
+    );
+    const sum = (key) => visible.reduce((total, row) => total + row[key], 0);
+    const chart = (title, key) => {
+      const groups = new Map();
+      visible.forEach((r) => {
+        const label = key === "month" ? r.invoice_date.slice(0, 7) : r.customer;
+        groups.set(label, (groups.get(label) || 0) + r.collected_cents);
+      });
+      const entries = [...groups]
+        .sort((a, b) =>
+          key === "month" ? a[0].localeCompare(b[0]) : b[1] - a[1],
+        )
+        .slice(0, key === "month" ? groups.size : 5);
+      const max = Math.max(1, ...entries.map((r) => r[1]));
+      return el(
+        "section",
+        { class: "panel analytics-chart" },
+        el("h2", {}, title),
+        el("p", {}, "Collected USD · grouped by invoice date"),
+        entries.length
+          ? entries.map(([label, amount]) =>
+              el(
+                "div",
+                { class: "analytics-bar-row" },
+                el("span", {}, label.replace(/^Demo\s+/, "")),
+                el(
+                  "div",
+                  { class: "analytics-bar-track" },
+                  el("div", {
+                    class: "analytics-bar",
+                    style: { width: `${(amount / max) * 100}%` },
+                  }),
+                ),
+                el("strong", {}, money(amount)),
+              ),
+            )
+          : el("p", {}, "No billing records match these filters."),
+      );
+    };
+    content.replaceChildren(
+      el(
+        "div",
+        { class: "analytics-metrics" },
+        [
+          ["Billed", sum("billed_cents")],
+          ["Collected", sum("collected_cents")],
+          ["Outstanding", sum("outstanding_cents")],
+          ["Rentals", new Set(visible.map((r) => r.rental_order)).size],
+        ].map(([label, value], i) =>
+          el(
+            "section",
+            { class: "panel analytics-metric" },
+            el("span", {}, label),
+            el("strong", {}, i < 3 ? money(value) : value),
+          ),
+        ),
+      ),
+      el(
+        "div",
+        { class: "analytics-charts" },
+        chart("Collections by month", "month"),
+        chart("Top 5 customers by collections", "customer"),
+      ),
+      el(
+        "section",
+        { class: "panel analytics-ledger" },
+        el(
+          "div",
+          { class: "panel-heading" },
+          el("h2", {}, "Rental billing ledger"),
+          el("span", {}, `${visible.length} invoices`),
+        ),
+        el(
+          "div",
+          { class: "table-scroll" },
+          el(
+            "table",
+            {},
+            el(
+              "thead",
+              {},
+              el(
+                "tr",
+                {},
+                [
+                  "Rental / invoice",
+                  "Customer",
+                  "Invoice date",
+                  "Documents ready",
+                  "Billed",
+                  "Collected",
+                  "Outstanding",
+                ].map((x) => el("th", {}, x)),
+              ),
+            ),
+            el(
+              "tbody",
+              {},
+              visible.map((r) =>
+                el(
+                  "tr",
+                  {},
+                  el(
+                    "td",
+                    {},
+                    el("strong", {}, r.rental_order),
+                    el("div", {}, r.invoice_id),
+                  ),
+                  el("td", {}, r.customer.replace(/^Demo\s+/, "")),
+                  el("td", {}, r.invoice_date),
+                  el("td", {}, `${r.ready_work_orders} / ${r.work_orders}`),
+                  ...[
+                    "billed_cents",
+                    "collected_cents",
+                    "outstanding_cents",
+                  ].map((k) => el("td", {}, money(r[k]))),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      visible.length
+        ? ""
+        : empty(
+            "No billing records",
+            data.ledger_available
+              ? "Try another customer or month."
+              : "Add an explicit rental billing ledger to see financial totals.",
+          ),
+      el(
+        "p",
+        { class: "analytics-note" },
+        "Collected means payments recorded against invoices, not profit or recognized revenue. Month groups use invoice dates, not payment dates. Document readiness does not imply payment.",
+      ),
+    );
+  };
+  const exportRows = () => {
+    const keys = [
+      "invoice_id",
+      "rental_order",
+      "customer",
+      "invoice_date",
+      "billed_cents",
+      "collected_cents",
+      "outstanding_cents",
+      "synthetic",
+    ];
+    const csv = [keys, ...visible.map((r) => keys.map((k) => r[k]))]
+      .map((row) =>
+        row.map((v) => '"' + String(v).replaceAll('"', '""') + '"').join(","),
+      )
+      .join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const link = el("a", { href: url, download: "rental-analytics.csv" });
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  customer.addEventListener("input", render);
+  month.addEventListener("change", render);
+  main.replaceChildren(
+    heading(
+      "Rental analytics",
+      "Connect document operations to rental billing and collections.",
+      [button("Export CSV", exportRows, "button secondary", "down")],
+    ),
+    el(
+      "div",
+      { class: "analytics-notice" },
+      data.synthetic
+        ? "SYNTHETIC BILLING · Fictional amounts for demonstration. No revenue is inferred from OCR."
+        : "BILLING LEDGER · Explicit invoice and collection amounts in USD.",
+    ),
+    el(
+      "div",
+      { class: "analytics-filters" },
+      customer,
+      month,
+      button("Clear filters", () => {
+        customer.value = "";
+        month.value = "";
+        render();
+      }),
+    ),
+    content,
+  );
+  render();
+}

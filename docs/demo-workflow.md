@@ -80,6 +80,7 @@ This adds `batch_10_ALL_CORRECT_8_orders.pdf`: eight documents (2 rental orders 
 | --- | --- |
 | **Overview** | Upload PDFs and see flat Approved / In review order rows, with downloads for approved orders. |
 | **Dataset** | Search the document-derived tracker by order (RO or SO), work order or shipment, customer or address. The table leads with **Order**, **Work order** and **Address**. Check completeness and download marks. |
+| **Rental analytics** | View explicit rental billing, collections, customer and monthly charts; see [billing setup](rental-analytics.md). |
 | **OCR activity** | Follow the current PDF's actual page total and processing progress. Download its completed orders together. |
 | **Flags** | Inspect incomplete orders, unmatched images and field conflicts; repair assignments or upload missing pages. |
 | **Ingestion history** | See document-processing runs. |

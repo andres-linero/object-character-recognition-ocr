@@ -3322,8 +3322,12 @@ a[aria-disabled="true"] {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.scan-download-count.ready dd { color: #207e6c; }
-.scan-download-count.attention dd { color: #9b711d; }
+.scan-download-count.ready dd {
+  color: #207e6c;
+}
+.scan-download-count.attention dd {
+  color: #9b711d;
+}
 .scan-download-summary small {
   display: block;
   margin-top: 10px;
@@ -3344,5 +3348,113 @@ a[aria-disabled="true"] {
 @media (max-width: 800px) {
   .ocr-processing {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Rental billing and document operations share the workspace visual language. */
+.analytics-notice {
+  padding: 14px 18px;
+  background: #edf5f1;
+  color: #245e50;
+  border: 1px solid #cfe2d9;
+  border-radius: 10px;
+  margin-bottom: 22px;
+  font-size: 12px;
+  letter-spacing: 0.025em;
+}
+.analytics-filters {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.analytics-filters input {
+  border: 1px solid #dbe1de;
+  background: white;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font: inherit;
+}
+.analytics-filters input[type="search"] {
+  flex: 1;
+  min-width: 220px;
+}
+.analytics-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  margin-bottom: 24px;
+}
+.analytics-metric {
+  padding: 22px;
+  display: grid;
+  gap: 14px;
+}
+.analytics-metric span {
+  color: #68756e;
+  font-size: 13px;
+}
+.analytics-metric strong {
+  font-size: 28px;
+  letter-spacing: -0.04em;
+  color: #234e42;
+}
+.analytics-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  margin-bottom: 24px;
+}
+.analytics-chart {
+  padding: 24px;
+}
+.analytics-chart h2,
+.analytics-ledger h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+.analytics-chart p,
+.analytics-note {
+  color: #6b7770;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.analytics-bar-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) 2fr 90px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  font-size: 12px;
+}
+.analytics-bar-row strong {
+  text-align: right;
+}
+.analytics-bar-track {
+  height: 14px;
+  background: #edf2ef;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.analytics-bar {
+  height: 100%;
+  background: #448873;
+  border-radius: 4px;
+}
+.analytics-ledger td {
+  padding: 16px;
+  white-space: nowrap;
+}
+.analytics-ledger td div {
+  font-size: 11px;
+  color: #78837d;
+  margin-top: 5px;
+}
+@media (max-width: 1000px) {
+  .analytics-charts {
+    grid-template-columns: 1fr;
+  }
+  .analytics-metrics {
+    grid-template-columns: repeat(2, 1fr);
   }
 }

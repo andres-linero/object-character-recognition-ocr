@@ -163,7 +163,7 @@ test("Documents is removed and its old route opens Dataset", async () => {
   const { dom, document, calls } = await boot("#/documents");
   assert.equal(dom.window.location.hash, "#/tickets");
   assert.equal(document.querySelector("h1").textContent, "Order Tracker");
-  assert.equal(document.querySelectorAll("#navigation button").length, 5);
+  assert.equal(document.querySelectorAll("#navigation button").length, 6);
   assert.equal(findButton(document, "Documents"), undefined);
   assert.ok(document.querySelector("tbody"));
   assert.equal(
@@ -175,7 +175,7 @@ test("Documents is removed and its old route opens Dataset", async () => {
 test("restored tabs count files and show dataset context without test-stage choices", async () => {
   const { dom, document } = await boot();
   assert.equal(document.querySelector("h1").textContent, "Scan intake");
-  assert.equal(document.querySelectorAll("#navigation button").length, 5);
+  assert.equal(document.querySelectorAll("#navigation button").length, 6);
   assert.deepEqual(
     [...document.querySelectorAll(".summary-value")].map((n) => n.textContent),
     ["2", "30 / 60", "1"],
@@ -409,7 +409,7 @@ test("dragging a PDF submits it and retains its filename and status", async () =
     document.querySelector(".intake-upload-status").textContent,
     /OCR will start automatically/,
   );
-  assert.equal(document.querySelectorAll("#navigation button").length, 5);
+  assert.equal(document.querySelectorAll("#navigation button").length, 6);
   assert.match(
     document.querySelector(".intake-file-list").textContent,
     /demo_scan.pdf.*Submitted to OCR/,
@@ -2091,4 +2091,23 @@ test("Order, Work order, Address lead the list and export, and a shipment sits u
   assert.match(unreadSection.textContent, /Work order W-0000003/);
   assert.doesNotMatch(flags.textContent, /Sales orders needing attention/);
   dom.window.close();
+});
+
+test("rental analytics filters cents-based totals and retains invoice evidence", async () => {
+  const { document, window } = await boot("#/tickets");
+  window.eval(`analyticsView({ledger_available:true,synthetic:true,rows:[
+    {invoice_id:'A',rental_order:'RO-1',customer:'Amber',invoice_date:'2026-11-01',billed_cents:10001,collected_cents:5000,outstanding_cents:5001,work_orders:3,ready_work_orders:2},
+    {invoice_id:'B',rental_order:'RO-2',customer:'Cedar',invoice_date:'2026-10-01',billed_cents:20000,collected_cents:20000,outstanding_cents:0,work_orders:1,ready_work_orders:1}
+  ]})`);
+  assert.match(document.querySelector(".analytics-metrics").textContent, /\$300\.01/);
+  const search = document.querySelector('[aria-label="Search analytics"]');
+  search.value = "Amber";
+  search.dispatchEvent(new window.Event("input"));
+  assert.match(document.querySelector(".analytics-metrics").textContent, /\$100\.01/);
+  assert.equal(document.querySelectorAll(".analytics-ledger tbody tr").length, 1);
+  assert.match(document.querySelector(".analytics-ledger").textContent, /2 \/ 3/);
+  search.value = "missing";
+  search.dispatchEvent(new window.Event("input"));
+  assert.match(document.querySelector("#main").textContent, /No billing records/);
+  window.close();
 });

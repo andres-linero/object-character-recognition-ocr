@@ -334,6 +334,15 @@ def create_app(root=ROOT, databases=None, allowed_roots=None):
                 rows = [r for r in rows if not r["reviewed"]]
             return {"tickets": rows, "total": len(rows)}
 
+    @app.get("/api/workspaces/{dataset}/analytics")
+    def analytics(dataset, customer: str = "", month: str = ""):
+        from .analytics import rental_analytics
+        with workspace(dataset) as store:
+            try:
+                return rental_analytics(all_tickets(store), Path(databases[dataset]).parent / "rental_billing.csv", customer, month)
+            except (ValueError, KeyError) as error:
+                raise HTTPException(422, "Invalid rental billing ledger. Check dates, IDs, currency and integer amounts.") from error
+
     @app.get("/api/workspaces/{dataset}/parent-orders")
     def rental_order_list(dataset):
         with workspace(dataset) as store:
