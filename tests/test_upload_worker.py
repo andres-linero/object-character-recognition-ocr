@@ -1,5 +1,4 @@
 """Exercise real upload-to-worker delivery without making Azure calls."""
-import time
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -9,7 +8,7 @@ from ocr_workspace.web_api import create_app
 from scripts.create_demo_data import generate_dataset
 
 
-def test_upload_starts_ocr_and_recovers_queued_upload_on_restart(tmp_path, monkeypatch):
+def test_upload_starts_ocr_and_recovers_queued_upload_on_restart(tmp_path, monkeypatch, wait_for_intake):
     data = tmp_path / 'demo_data'
     manifest = generate_dataset(data, count=1, min_pages=6, max_pages=6, rasterize=False)
     runtime = tmp_path / 'demo_runtime'
@@ -32,10 +31,7 @@ def test_upload_starts_ocr_and_recovers_queued_upload_on_restart(tmp_path, monke
         response = client.post('/api/workspaces/workspace/intake', content=source.read_bytes(),
                                headers={'content-type': 'application/pdf', 'x-file-name': 'mixed.pdf'})
         assert response.status_code == 200, response.text
-        deadline = time.monotonic() + 5
-        while app.state.intake_progress.snapshot()['phase'] != 'ready' and time.monotonic() < deadline:
-            time.sleep(.01)
-        assert app.state.intake_progress.snapshot()['phase'] == 'ready'
+        wait_for_intake(app, 'ready')
         assert len(calls) == 6
         assert [(o['order_number'], o['order_type']) for o in store.rows(select(db.orders))] == [('W-0000001', 'RENTAL')]
         assert [r['rental_number'] for r in store.rows(select(db.rental_orders))] == ['RO-0000001']
@@ -46,10 +42,7 @@ def test_upload_starts_ocr_and_recovers_queued_upload_on_restart(tmp_path, monke
     path.with_suffix('.pdf.queued').write_text('queued\n')
     app = create_app(root=tmp_path)
     with TestClient(app):
-        deadline = time.monotonic() + 5
-        while app.state.intake_progress.snapshot()['phase'] != 'ready' and time.monotonic() < deadline:
-            time.sleep(.01)
-        assert app.state.intake_progress.snapshot()['phase'] == 'ready'
+        wait_for_intake(app, 'ready')
         assert len(calls) == 6  # Previously processed content does not incur more OCR calls.
         assert not path.with_suffix('.pdf.queued').exists()
     store.close()
