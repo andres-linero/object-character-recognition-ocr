@@ -1,7 +1,6 @@
 """Order data must originate in uploaded pages, never Excel or fixture metadata."""
 import io
 import json
-import time
 import zipfile
 
 import pymupdf as fitz
@@ -42,20 +41,15 @@ def empty_workspace(tmp_path, manifest, combined, monkeypatch, responses):
     return store, create_app(root=tmp_path)
 
 
-def upload_and_wait(app, client, combined, phase):
+def upload_and_wait(app, client, combined, phase, wait_for_intake):
     response = client.post('/api/workspaces/workspace/intake', content=combined.read_bytes(),
         headers={'content-type': 'application/pdf', 'x-file-name': 'scan.pdf'})
     assert response.status_code == 200, response.text
-    deadline = time.monotonic() + 5
-    while app.state.intake_progress.snapshot()['phase'] not in {phase, 'error'} and time.monotonic() < deadline:
-        time.sleep(.01)
-    snapshot = app.state.intake_progress.snapshot()
-    assert snapshot['phase'] == phase, snapshot
-    return snapshot
+    return wait_for_intake(app, phase)
 
 
 @pytest.mark.parametrize('gap_case', ['missing_page', 'present_but_unidentified'])
-def test_empty_workspace_builds_dataframe_orders_and_separates_missing_pages(tmp_path, monkeypatch, gap_case):
+def test_empty_workspace_builds_dataframe_orders_and_separates_missing_pages(tmp_path, monkeypatch, gap_case, wait_for_intake):
     data = tmp_path / 'demo_data'
     manifest = generate_dataset(data, count=2, min_pages=6, max_pages=6, rasterize=False)
     assert [t['order_id'] for t in manifest['tickets']] == ['W-0000001', 'W-0000002']
@@ -86,7 +80,7 @@ def test_empty_workspace_builds_dataframe_orders_and_separates_missing_pages(tmp
     store, app = empty_workspace(tmp_path, manifest, combined, monkeypatch, responses)
     with TestClient(app) as client:
         assert client.get('/api/workspaces/workspace/tickets').json()['tickets'] == []
-        snapshot = upload_and_wait(app, client, combined, 'needs_attention')
+        snapshot = upload_and_wait(app, client, combined, 'needs_attention', wait_for_intake)
         rows = client.get('/api/workspaces/workspace/tickets').json()['tickets']
         assert len(rows) == 2
         ready = next(r for r in rows if r['download_ready'])
@@ -127,7 +121,7 @@ def test_empty_workspace_builds_dataframe_orders_and_separates_missing_pages(tmp
     store.close()
 
 
-def test_sales_order_pages_become_a_shipment_document_under_its_sales_order(tmp_path, monkeypatch):
+def test_sales_order_pages_become_a_shipment_document_under_its_sales_order(tmp_path, monkeypatch, wait_for_intake):
     data = tmp_path / 'demo_data'
     manifest = generate_dataset(data, count=4, min_pages=6, max_pages=6, rasterize=False)
     rental, sale = manifest['tickets'][0], manifest['tickets'][3]
@@ -154,7 +148,7 @@ def test_sales_order_pages_become_a_shipment_document_under_its_sales_order(tmp_
     responses = [header(chosen[index]) for index, _ in sequence]
     store, app = empty_workspace(tmp_path, manifest, combined, monkeypatch, responses)
     with TestClient(app) as client:
-        snapshot = upload_and_wait(app, client, combined, 'ready')
+        snapshot = upload_and_wait(app, client, combined, 'ready', wait_for_intake)
         listing = client.get('/api/workspaces/workspace/tickets').json()['tickets']
         rows = {r['order_number']: r for r in listing}
         assert set(rows) == {'W-0000001', 'Shipment 00001'}
@@ -244,7 +238,7 @@ def test_sales_order_pages_become_a_shipment_document_under_its_sales_order(tmp_
     store.close()
 
 
-def test_sales_page_showing_only_its_sales_order_is_kept_under_that_order_for_review(tmp_path, monkeypatch):
+def test_sales_page_showing_only_its_sales_order_is_kept_under_that_order_for_review(tmp_path, monkeypatch, wait_for_intake):
     data = tmp_path / 'demo_data'
     manifest = generate_dataset(data, count=4, min_pages=6, max_pages=6, rasterize=False)
     sale = manifest['tickets'][3]
@@ -268,7 +262,7 @@ def test_sales_page_showing_only_its_sales_order_is_kept_under_that_order_for_re
     responses = ['SALES ORDER Sales Order No. SO-0000002' if page == 5 else header(sale) for page in sequence]
     store, app = empty_workspace(tmp_path, manifest, combined, monkeypatch, responses)
     with TestClient(app) as client:
-        upload_and_wait(app, client, combined, 'needs_attention')
+        upload_and_wait(app, client, combined, 'needs_attention', wait_for_intake)
         rows = client.get('/api/workspaces/workspace/tickets').json()['tickets']
         assert [(r['order_number'], r['order_type'], r['parent_order_number']) for r in rows] == [
             ('Shipment 00001', 'SALE', 'SO-0000002')]
